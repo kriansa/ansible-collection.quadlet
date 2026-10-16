@@ -1,0 +1,67 @@
+# Turns the stock cloud image into the test host, once. The result is cached as a disk image and
+# every test session boots a throwaway copy of it.
+#
+# The host is set up the way this collection sets up a container host - with its own podman role -
+# plus what makes tests fast and deterministic: images pulled ahead of time (tests run without
+# internet), and nothing in the background that could change state mid-test.
+- name: Provision the integration test host
+  hosts: testhost
+  become: true
+  gather_facts: true
+  roles:
+    - kriansa.commons.podman
+  tasks:
+    # The module's mount options rely on SELinux labels, so tests without it would prove nothing
+    - name: SELinux must be enforcing
+      ansible.builtin.assert:
+        that: ansible_facts.selinux.mode == 'enforcing'
+        fail_msg: "SELinux is {{ ansible_facts.selinux.mode }} on the test image"
+
+    - name: Install what the tests inspect the host with
+      ansible.builtin.dnf:
+        name:
+          - audit  # ausearch, to report SELinux denials
+          - catatonit
+          - container-selinux
+          - crun
+        state: present
+
+    - name: Pull every image the tests run
+      ansible.builtin.command:
+        cmd: podman pull {{ item }}
+      loop:
+        # The volume ownership bootstrap image, and the image test containers run
+        - docker.io/library/alpine:3.24
+      changed_when: true
+
+    # Rootful pods need podman's pause image. It is built locally rather than pulled, and
+    # building it once here keeps the first pod test from paying for it
+    - name: Build the pause image
+      ansible.builtin.shell:
+        cmd: podman pod create --name warmup && podman pod rm warmup
+      changed_when: true
+
+    - name: Create the journald drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Never drop journal messages, which the tests count
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/50-tests.conf
+        mode: "0644"
+        content: |
+          [Journal]
+          RateLimitIntervalSec=0
+
+    - name: Nothing in the background may run dnf during a test
+      ansible.builtin.systemd:
+        name: dnf-makecache.timer
+        masked: true
+
+    - name: Cloud-init has done its job; later boots skip it
+      ansible.builtin.file:
+        path: /etc/cloud/cloud-init.disabled
+        state: touch
+        mode: "0644"

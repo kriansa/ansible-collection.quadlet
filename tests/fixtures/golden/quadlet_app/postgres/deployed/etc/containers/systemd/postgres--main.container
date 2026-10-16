@@ -1,0 +1,22 @@
+[Unit]
+Description=PostgreSQL
+RequiresMountsFor=/var/lib/containers/storage
+Requires=postgres--data-volume-init.service
+After=postgres--data-volume-init.service
+
+[Container]
+ContainerName=postgres--main
+Image=docker.io/library/postgres:17
+Network=postgres--app.network
+Volume=postgres--data.volume:/var/lib/postgresql/data:rw,Z,idmap
+Volume=/srv/postgres/init/main:/docker-entrypoint-initdb.d:ro,Z,idmap
+Environment=POSTGRES_PASSWORD=stub-6d3b851056dc80e6
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

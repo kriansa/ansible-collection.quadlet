@@ -1,0 +1,6 @@
+listen: 0.0.0.0:8000
+cache_dir: /cache
+features:
+{% for flag in feature_flags %}
+  - {{ flag }}
+{% endfor %}

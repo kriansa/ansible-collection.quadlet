@@ -1,0 +1,10 @@
+[Unit]
+Description=A workload described as a Kubernetes pod
+
+[Kube]
+Yaml=/srv/{{ quadlet_app_name }}/config/main/pod.yaml
+Network=app.network
+PublishPort=8081:80
+
+[Install]
+WantedBy=multi-user.target

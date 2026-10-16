@@ -1,0 +1,18 @@
+[Unit]
+Description=Every templating feature in one container
+
+[Container]
+Image=docker.io/library/alpine:{{ alpine_version }}
+Environment=APP_NAME={{ quadlet_app_name }}
+Environment=DB_PASSWORD="{{ lookup('passwordstore', 'test/templating/db') }}"
+Environment=DB_PORT={{ lookup('passwordstore', 'test/templating/db subkey=port missing_subkey=error') | int }}
+Environment=FEATURES={{ feature_flags | to_json }}
+Environment=SCHEMA_VERSION={{ schema_version }}
+Environment=RELEASED={{ release_date }}
+{% if enable_debug %}
+Environment=LOG_LEVEL=debug
+{% else %}
+Environment=LOG_LEVEL=info
+{% endif %}
+Volume=%config%:/etc/app
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'

@@ -1,0 +1,13 @@
+[Unit]
+Description=Nginx web server
+
+[Container]
+Image=docker.io/library/nginx:{{ nginx_version | default('latest') }}
+PublishPort={{ public_ip }}:{{ nginx_port | default(8080) }}:80
+Volume=%config%:/etc/nginx/conf.d
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Synthetic HTTP probe
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=agent--probe
+Image=ghcr.io/example/probe:1
+# A small explicit range, which the module leaves alone
+UserNS=auto:size=2048
+Exec=/probe --target http://webapp--main/ --interval 30s

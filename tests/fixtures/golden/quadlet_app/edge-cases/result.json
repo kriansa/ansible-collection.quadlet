@@ -1,0 +1,100 @@
+{
+  "calls": [
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "edge-cases--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-enabled",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/system-generators/podman-system-generator",
+        "-dryrun",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
+        "daemon-reload"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-enabled",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "enable",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "edge-cases--data-volume-init.service"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "edge-cases--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "start",
+        "edge-cases--main.service"
+      ],
+      "timeout": 120
+    }
+  ],
+  "exit": {
+    "application_name": "edge-cases",
+    "changed": true,
+    "msg": "quadlet files deployed and service started",
+    "quadlet_files": [
+      "edge-cases--data.volume",
+      "edge-cases--db.container",
+      "edge-cases--main.container",
+      "edge-cases--main.network",
+      "edge-cases--data-volume-init.container"
+    ],
+    "service_name": "edge-cases--main.service",
+    "unit_files": [
+      "edge-cases--cleanup.timer"
+    ]
+  },
+  "failure": null
+}

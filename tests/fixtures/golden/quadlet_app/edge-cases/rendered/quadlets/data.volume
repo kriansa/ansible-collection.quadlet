@@ -1,0 +1,4 @@
+[Volume]
+# Declared twice: the last one wins
+X-Owner=1000:1000
+X-Owner=2000:2000

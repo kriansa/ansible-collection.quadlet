@@ -1,0 +1,10 @@
+[Unit]
+Description=Key-value store, in the backend pod
+
+[Container]
+Image=docker.io/library/redis:7
+Pod=backend.pod
+Exec=redis-server /etc/shared/redis.conf
+
+[Install]
+WantedBy=multi-user.target

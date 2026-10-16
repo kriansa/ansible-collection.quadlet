@@ -1,0 +1,24 @@
+[Unit]
+Description=Log and metrics agent
+RequiresMountsFor=/var/log/journal
+RequiresMountsFor=/var/lib/containers/storage
+Requires=agent--state-volume-init.service
+After=agent--state-volume-init.service
+
+[Container]
+ContainerName=agent--main
+Image=ghcr.io/example/agent:v1.20.0
+# Reading the host journal only works with the host's own ids
+UserNS=host
+Volume=/var/log/journal:/var/log/journal:ro
+Volume=/etc/machine-id:/etc/machine-id:ro
+Volume=/srv/agent/config/main/agent.yaml:/etc/agent/agent.yaml:ro,Z,idmap
+Volume=agent--state.volume:/var/lib/agent:rw,Z,idmap
+# Joined to scrape the web app, which owns this network
+Network=webapp--app
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

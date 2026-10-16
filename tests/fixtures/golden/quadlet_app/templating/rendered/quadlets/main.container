@@ -1,0 +1,14 @@
+[Unit]
+Description=Every templating feature in one container
+
+[Container]
+Image=docker.io/library/alpine:3.24
+Environment=APP_NAME=templating
+Environment=DB_PASSWORD="stub-8dc61bcb0447d1a9"
+Environment=DB_PORT=43808
+Environment=FEATURES=["search", "export"]
+Environment=SCHEMA_VERSION=18.6
+Environment=RELEASED=2026-09-28
+Environment=LOG_LEVEL=info
+Volume=%config%:/etc/app
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'

@@ -1,0 +1,62 @@
+{
+  "calls": [
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "nginx--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "nginx--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/system-generators/podman-system-generator",
+        "-dryrun",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
+        "daemon-reload"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "nginx--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "start",
+        "nginx--main.service"
+      ],
+      "timeout": 120
+    }
+  ],
+  "exit": {
+    "application_name": "nginx",
+    "changed": true,
+    "msg": "quadlet files deployed and service started",
+    "quadlet_files": [
+      "nginx--main.container"
+    ],
+    "service_name": "nginx--main.service",
+    "unit_files": []
+  },
+  "failure": null
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=GPU metrics exporter
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=agent--gpu-exporter
+Image=ghcr.io/example/gpu-exporter:2
+AddDevice=/dev/dri
+GroupAdd=39
+# A bare auto; the module gives it a full-size range
+UserNS=auto:size=65536

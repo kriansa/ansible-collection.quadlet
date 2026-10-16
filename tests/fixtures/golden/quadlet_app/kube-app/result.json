@@ -1,0 +1,63 @@
+{
+  "calls": [
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "kube-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "kube-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/system-generators/podman-system-generator",
+        "-dryrun",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
+        "daemon-reload"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "kube-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "start",
+        "kube-app--main.service"
+      ],
+      "timeout": 120
+    }
+  ],
+  "exit": {
+    "application_name": "kube-app",
+    "changed": true,
+    "msg": "quadlet files deployed and service started",
+    "quadlet_files": [
+      "kube-app--app.network",
+      "kube-app--main.kube"
+    ],
+    "service_name": "kube-app--main.service",
+    "unit_files": []
+  },
+  "failure": null
+}

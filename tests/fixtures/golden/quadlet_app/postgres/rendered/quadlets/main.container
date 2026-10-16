@@ -1,0 +1,15 @@
+[Unit]
+Description=PostgreSQL
+
+[Container]
+Image=docker.io/library/postgres:17
+Network=app.network
+Volume=data.volume:/var/lib/postgresql/data
+Volume=%init%:/docker-entrypoint-initdb.d
+Environment=POSTGRES_PASSWORD=stub-6d3b851056dc80e6
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

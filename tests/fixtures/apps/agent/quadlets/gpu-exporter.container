@@ -1,0 +1,9 @@
+[Unit]
+Description=GPU metrics exporter
+
+[Container]
+Image=ghcr.io/example/gpu-exporter:2
+AddDevice=/dev/dri
+GroupAdd={{ ansible_facts.getent_group['video'][1] }}
+# A bare auto; the module gives it a full-size range
+UserNS=auto

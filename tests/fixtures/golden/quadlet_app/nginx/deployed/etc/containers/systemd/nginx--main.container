@@ -1,0 +1,18 @@
+[Unit]
+Description=Nginx web server
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=nginx--main
+Image=docker.io/library/nginx:1.29
+PublishPort=192.0.2.10:8080:80
+Volume=/srv/nginx/config/main:/etc/nginx/conf.d:ro,Z,idmap
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

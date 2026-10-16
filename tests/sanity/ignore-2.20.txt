@@ -1,0 +1,9 @@
+plugins/action/quadlet_app.py pylint:disallowed-name # frozen until quadlet_stack replaces it
+plugins/modules/quadlet_app.py no-assert # frozen until quadlet_stack replaces it
+plugins/modules/quadlet_app.py pylint:disallowed-name # frozen until quadlet_stack replaces it
+plugins/modules/quadlet_app.py validate-modules:doc-default-does-not-match-spec # frozen; internal parameter
+plugins/modules/quadlet_app.py validate-modules:import-before-documentation # frozen until quadlet_stack replaces it
+plugins/modules/quadlet_app.py validate-modules:missing-gplv3-license # this collection is Apache-2.0
+plugins/modules/quadlet_app.py validate-modules:undocumented-parameter # internal parameters set by the action plugin
+roles/tunneled_ssh_operator/files/wg-reresolve-dns shebang # a script deployed as-is, not a module
+tests/fixtures/apps/webapp/config/api/settings.yaml yamllint!skip # a Jinja template with a for loop, not YAML until rendered

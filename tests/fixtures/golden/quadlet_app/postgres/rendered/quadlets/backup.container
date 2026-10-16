@@ -1,0 +1,16 @@
+# No [Install] section: this container runs when the timer says so, not at boot.
+# No RemainAfterExit either, or only the first trigger would do anything.
+[Unit]
+Requires=main.service
+After=main.service
+
+[Container]
+Image=docker.io/library/postgres:17
+Network=app.network
+Volume=dumps.volume:/dumps
+Environment=PGHOST=postgres--main
+Environment=PGPASSWORD=stub-6d3b851056dc80e6
+Exec=/usr/bin/pg_dumpall -U postgres -f /dumps/dump.sql
+
+[Service]
+Type=oneshot

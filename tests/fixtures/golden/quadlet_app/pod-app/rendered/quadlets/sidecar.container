@@ -1,0 +1,10 @@
+[Unit]
+Description=Metrics sidecar, in the backend pod
+After=main.service
+
+[Container]
+Image=ghcr.io/example/redis-exporter:1
+Pod=backend.pod
+# An explicit empty UserNS= keeps the module's default out: a container joining a pod cannot have a
+# user namespace of its own
+UserNS=

@@ -1,0 +1,3 @@
+[Pod]
+PublishPort={{ public_ip }}:9000:9000
+Volume=%config%:/etc/shared

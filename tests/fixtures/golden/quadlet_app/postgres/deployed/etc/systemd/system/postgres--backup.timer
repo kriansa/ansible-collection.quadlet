@@ -1,0 +1,7 @@
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=postgres--backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=API backend
+
+[Container]
+Image=ghcr.io/example/api:{{ api_version }}
+Network=app.network
+Volume=cache.volume:/cache
+Volume=%config%:/app/config
+# Other containers of the app are reached by name; plain values are not prefixed automatically
+Environment=WORKER_HOST={{ quadlet_app_name }}--worker
+Environment=API_KEY={{ lookup('passwordstore', 'test/webapp/api-key') }}

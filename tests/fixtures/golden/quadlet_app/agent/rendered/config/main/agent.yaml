@@ -1,0 +1,7 @@
+journal:
+  path: /var/log/journal
+scrape:
+  - target: webapp--api:8000
+    interval: 60s
+labels:
+  host: "www.example.test"

@@ -1,0 +1,18 @@
+[Unit]
+Description=API backend
+RequiresMountsFor=/var/lib/containers/storage
+Requires=webapp--cache-volume-init.service
+After=webapp--cache-volume-init.service
+
+[Container]
+ContainerName=webapp--api
+Image=ghcr.io/example/api:2.4.1
+Network=webapp--app.network
+Volume=webapp--cache.volume:/cache:rw,Z,idmap
+Volume=/srv/webapp/config/api:/app/config:ro,Z,idmap
+# Other containers of the app are reached by name; plain values are not prefixed automatically
+Environment=WORKER_HOST=webapp--worker
+Environment=API_KEY=stub-a3d5aedb1fc8e266
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536

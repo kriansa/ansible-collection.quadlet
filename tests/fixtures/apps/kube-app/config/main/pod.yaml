@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ quadlet_app_name }}"
+spec:
+  containers:
+    - name: web
+      image: docker.io/library/nginx:{{ nginx_version }}
+      ports:
+        - containerPort: 80

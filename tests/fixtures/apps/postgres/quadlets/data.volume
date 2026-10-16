@@ -1,0 +1,3 @@
+# The image starts as root and drops to its own postgres user, uid 999, which has to own the data.
+[Volume]
+X-Owner=999:999

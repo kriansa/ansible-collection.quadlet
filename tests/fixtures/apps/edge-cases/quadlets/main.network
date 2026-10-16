@@ -1,0 +1,3 @@
+# Above the header, so dropped like the one in main.container
+[Network]
+NetworkName=custom-net

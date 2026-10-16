@@ -1,0 +1,14 @@
+[Unit]
+Description=Background jobs
+Requires=api.service
+After=api.service
+
+[Container]
+Image=ghcr.io/example/api:{{ api_version }}
+Network=app.network
+Volume=cache.volume:/cache:ro
+Volume=%config%/worker.env:/app/worker.env:ro
+Exec=/app/bin/worker
+
+[Service]
+Restart=on-failure

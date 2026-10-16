@@ -1,0 +1,13 @@
+[Unit]
+Description=Web frontend
+Wants=api.service
+After=api.service
+
+[Container]
+Image=docker.io/library/nginx:alpine
+Network=app.network
+PublishPort=192.0.2.10:8080:80
+Volume=%config%/nginx.conf:/etc/nginx/nginx.conf
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Every templating feature in one container
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=templating--main
+Image=docker.io/library/alpine:3.24
+Environment=APP_NAME=templating
+Environment=DB_PASSWORD="stub-8dc61bcb0447d1a9"
+Environment=DB_PORT=43808
+Environment=FEATURES=["search", "export"]
+Environment=SCHEMA_VERSION=18.6
+Environment=RELEASED=2026-09-28
+Environment=LOG_LEVEL=info
+Volume=/srv/templating/config/main:/etc/app:ro,Z,idmap
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536

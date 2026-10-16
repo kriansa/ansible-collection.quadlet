@@ -1,0 +1,4 @@
+[Container]
+Image=docker.io/library/alpine:latest
+Volume=data.volume:/data
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'

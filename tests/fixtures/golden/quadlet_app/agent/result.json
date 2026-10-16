@@ -1,0 +1,74 @@
+{
+  "calls": [
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "agent--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "agent--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/system-generators/podman-system-generator",
+        "-dryrun",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
+        "daemon-reload"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "agent--state-volume-init.service"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "agent--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "start",
+        "agent--main.service"
+      ],
+      "timeout": 120
+    }
+  ],
+  "exit": {
+    "application_name": "agent",
+    "changed": true,
+    "msg": "quadlet files deployed and service started",
+    "quadlet_files": [
+      "agent--gpu-exporter.container",
+      "agent--main.container",
+      "agent--probe.container",
+      "agent--state.volume",
+      "agent--state-volume-init.container"
+    ],
+    "service_name": "agent--main.service",
+    "unit_files": []
+  },
+  "failure": null
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Synthetic HTTP probe
+
+[Container]
+Image=ghcr.io/example/probe:1
+# A small explicit range, which the module leaves alone
+UserNS=auto:size=2048
+Exec=/probe --target http://webapp--main/ --interval 30s

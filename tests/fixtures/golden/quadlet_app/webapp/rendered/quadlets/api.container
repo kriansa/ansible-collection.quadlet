@@ -1,0 +1,11 @@
+[Unit]
+Description=API backend
+
+[Container]
+Image=ghcr.io/example/api:2.4.1
+Network=app.network
+Volume=cache.volume:/cache
+Volume=%config%:/app/config
+# Other containers of the app are reached by name; plain values are not prefixed automatically
+Environment=WORKER_HOST=webapp--worker
+Environment=API_KEY=stub-a3d5aedb1fc8e266

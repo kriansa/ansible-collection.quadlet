@@ -1,0 +1,10 @@
+[Unit]
+Description=A workload described as a Kubernetes pod
+
+[Kube]
+Yaml=/srv/kube-app/config/main/pod.yaml
+Network=kube-app--app.network
+PublishPort=8081:80
+
+[Install]
+WantedBy=multi-user.target

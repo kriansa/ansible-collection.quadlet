@@ -1,0 +1,13 @@
+[Unit]
+RequiresMountsFor=/var/lib/containers/storage
+Requires=edge-cases--data-volume-init.service
+After=edge-cases--data-volume-init.service
+
+[Container]
+ContainerName=edge-cases--db
+Image=docker.io/library/alpine:latest
+Volume=edge-cases--data.volume:/data:rw,Z,idmap
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536

@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart the backend pod weekly
+
+[Timer]
+OnCalendar=weekly
+Unit=pod-app--backend-pod.service
+
+[Install]
+WantedBy=timers.target

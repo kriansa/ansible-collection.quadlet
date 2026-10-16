@@ -1,0 +1,3 @@
+[Timer]
+OnCalendar={{ backup_schedule | default('daily') }}
+Persistent=true

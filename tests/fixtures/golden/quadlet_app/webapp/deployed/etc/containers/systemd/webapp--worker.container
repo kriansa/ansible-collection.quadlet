@@ -1,0 +1,21 @@
+[Unit]
+Description=Background jobs
+Requires=webapp--api.service
+After=webapp--api.service
+RequiresMountsFor=/var/lib/containers/storage
+Requires=webapp--cache-volume-init.service
+After=webapp--cache-volume-init.service
+
+[Container]
+ContainerName=webapp--worker
+Image=ghcr.io/example/api:2.4.1
+Network=webapp--app.network
+Volume=webapp--cache.volume:/cache:ro
+Volume=/srv/webapp/config/worker/worker.env:/app/worker.env:ro
+Exec=/app/bin/worker
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Service]
+Restart=on-failure

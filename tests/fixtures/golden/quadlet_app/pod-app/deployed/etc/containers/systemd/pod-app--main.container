@@ -1,0 +1,15 @@
+[Unit]
+Description=Key-value store, in the backend pod
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=pod-app--main
+Image=docker.io/library/redis:7
+Pod=pod-app--backend.pod
+Exec=redis-server /etc/shared/redis.conf
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Install]
+WantedBy=multi-user.target

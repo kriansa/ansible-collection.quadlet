@@ -1,0 +1,21 @@
+[Unit]
+Requires=postgres--main.service
+After=postgres--main.service
+RequiresMountsFor=/var/lib/containers/storage
+Requires=postgres--dumps-volume-init.service
+After=postgres--dumps-volume-init.service
+
+[Container]
+ContainerName=postgres--backup
+Image=docker.io/library/postgres:17
+Network=postgres--app.network
+Volume=postgres--dumps.volume:/dumps:rw,Z,idmap
+Environment=PGHOST=postgres--main
+Environment=PGPASSWORD=stub-6d3b851056dc80e6
+Exec=/usr/bin/pg_dumpall -U postgres -f /dumps/dump.sql
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Service]
+Type=oneshot

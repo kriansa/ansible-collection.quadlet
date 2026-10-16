@@ -1,0 +1,90 @@
+{
+  "calls": [
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "pod-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-enabled",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "/usr/lib/systemd/system-generators/podman-system-generator",
+        "-dryrun",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
+        "daemon-reload"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-enabled",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "enable",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "is-active",
+        "pod-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "start",
+        "pod-app--main.service"
+      ],
+      "timeout": 120
+    }
+  ],
+  "exit": {
+    "application_name": "pod-app",
+    "changed": true,
+    "msg": "quadlet files deployed and service started",
+    "quadlet_files": [
+      "pod-app--backend.pod",
+      "pod-app--main.container",
+      "pod-app--sidecar.container"
+    ],
+    "service_name": "pod-app--main.service",
+    "unit_files": [
+      "pod-app--backend.timer"
+    ]
+  },
+  "failure": null
+}

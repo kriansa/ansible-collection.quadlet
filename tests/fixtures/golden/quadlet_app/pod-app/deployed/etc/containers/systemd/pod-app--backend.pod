@@ -1,0 +1,4 @@
+[Pod]
+PodName=pod-app--backend
+PublishPort=192.0.2.10:9000:9000
+Volume=/srv/pod-app/config/backend:/etc/shared:ro,Z,idmap

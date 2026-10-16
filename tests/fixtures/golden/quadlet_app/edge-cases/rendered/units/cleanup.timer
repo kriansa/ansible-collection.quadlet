@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly cleanup, run by the db container
+
+[Timer]
+OnCalendar=daily
+Unit=db.container
+
+[Install]
+WantedBy=timers.target

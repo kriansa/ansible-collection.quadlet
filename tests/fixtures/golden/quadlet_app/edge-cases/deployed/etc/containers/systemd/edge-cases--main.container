@@ -1,0 +1,28 @@
+[Unit]
+Description=Edge cases
+# Only the first unit of a multi-unit value gets the app prefix
+After=edge-cases--db.service cache.service
+After=network-online.target
+# A host unit, prefixed all the same
+Wants=edge-cases--sshd.service
+# Written with a trailing slash, so the storage dependency is added a second time
+RequiresMountsFor=/var/lib/containers/storage/
+RequiresMountsFor=/var/lib/containers/storage
+Requires=edge-cases--data-volume-init.service
+After=edge-cases--data-volume-init.service
+
+[Container]
+ContainerName=custom-name
+Image=docker.io/library/alpine:latest
+Network=host
+Volume=edge-cases--data.volume:/data:ro
+Volume=/srv/edge-cases/config/main/a.conf:/etc/a.conf:rw
+Volume=/srv/edge-cases/init/main/sub:/init:ro,Z,idmap
+Volume=/srv/shared:/shared
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Service]
+Restart=on-failure

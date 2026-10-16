@@ -1,0 +1,24 @@
+# Unusual but valid input, kept here so the goldens show exactly what the module does with it.
+# This comment sits above the first section header, so the module drops it.
+[Unit]
+Description=Edge cases
+# Only the first unit of a multi-unit value gets the app prefix
+After=db.service cache.service
+After=network-online.target
+# A host unit, prefixed all the same
+Wants=sshd.service
+# Written with a trailing slash, so the storage dependency is added a second time
+RequiresMountsFor=/var/lib/containers/storage/
+
+[Container]
+ContainerName=custom-name
+Image=docker.io/library/alpine:latest
+Network=host
+Volume=data.volume:/data:ro
+Volume=%config%/a.conf:/etc/a.conf:rw
+Volume=%init%sub:/init
+Volume=/srv/shared:/shared
+Exec=/bin/sh -c 'trap "exit 0" TERM; while :; do sleep 1; done'
+
+[Service]
+Restart=on-failure

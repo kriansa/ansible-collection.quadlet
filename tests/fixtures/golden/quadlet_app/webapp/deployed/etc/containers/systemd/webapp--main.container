@@ -1,0 +1,18 @@
+[Unit]
+Description=Web frontend
+Wants=webapp--api.service
+After=webapp--api.service
+RequiresMountsFor=/var/lib/containers/storage
+
+[Container]
+ContainerName=webapp--main
+Image=docker.io/library/nginx:alpine
+Network=webapp--app.network
+PublishPort=192.0.2.10:8080:80
+Volume=/srv/webapp/config/main/nginx.conf:/etc/nginx/nginx.conf:ro,Z,idmap
+# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a
+# container needs if it reads the host journal or other processes' /proc entries.
+UserNS=auto:size=65536
+
+[Install]
+WantedBy=multi-user.target

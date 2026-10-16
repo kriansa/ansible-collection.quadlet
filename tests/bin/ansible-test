@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#
+# Runs ansible-test against this checkout.
+#
+# ansible-test only works from inside a directory laid out as
+# .../ansible_collections/<namespace>/<name>/, and this checkout is not. So the tracked files (plus
+# untracked ones git does not ignore) are copied to such a directory under ~/.cache, and
+# ansible-test runs there with the arguments given here.
+#
+# Usage: tests/bin/ansible-test sanity --venv --python 3.14
+
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+copy_root="${XDG_CACHE_HOME:-$HOME/.cache}/kriansa-commons-tests/ansible-test"
+copy="$copy_root/ansible_collections/kriansa/commons"
+ansible_test="$repo/.venv/bin/ansible-test"
+
+if [[ ! -x "$ansible_test" ]]; then
+  echo "ansible-test not found at $ansible_test; run 'uv sync' first" >&2
+  exit 1
+fi
+
+rm -rf "$copy"
+mkdir -p "$copy"
+git -C "$repo" ls-files -z --cached --others --exclude-standard \
+  | (cd "$repo" && tar --null --files-from=- --create --file=-) \
+  | tar --extract --file=- --directory="$copy"
+
+cd "$copy"
+exec "$ansible_test" "$@"

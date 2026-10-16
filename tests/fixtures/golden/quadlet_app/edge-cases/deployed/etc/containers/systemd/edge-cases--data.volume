@@ -1,0 +1,3 @@
+[Volume]
+VolumeName=edge-cases--data
+# Declared twice: the last one wins
