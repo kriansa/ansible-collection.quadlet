@@ -42,7 +42,7 @@ def test_systemctl_timeout(make_app, host):
     step = app.deploy("started", args={"systemctl_timeout": 3})
 
     assert step.failed
-    assert step.msg == f"systemctl start {app.service('main')} timed out after 3s"
+    assert step.msg == f"systemctl restart {app.service('main')} timed out after 3s"
     # Only the client gave up; systemd carries on with the start job
     deadline = time.monotonic() + 60
     while host.active_state(app.service("main")) != "active" and time.monotonic() < deadline:

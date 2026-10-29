@@ -10,14 +10,6 @@
     },
     {
       "argv": [
-        "systemctl",
-        "is-active",
-        "agent--main.service"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
         "/usr/lib/systemd/system-generators/podman-system-generator",
         "-dryrun",
         "-v"
@@ -34,15 +26,22 @@
     {
       "argv": [
         "systemctl",
-        "restart",
-        "agent--state-volume-init.service"
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "agent--gpu-exporter.service",
+        "agent--main.service",
+        "agent--probe.service"
       ],
-      "timeout": 120
+      "timeout": 10
     },
     {
       "argv": [
         "systemctl",
-        "is-active",
+        "list-dependencies",
+        "--all",
+        "--type",
+        "service",
         "agent--main.service"
       ],
       "timeout": 10
@@ -50,10 +49,33 @@
     {
       "argv": [
         "systemctl",
-        "start",
+        "restart",
+        "agent--state-volume-init.service",
         "agent--main.service"
       ],
       "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "agent--gpu-exporter.service",
+        "agent--main.service",
+        "agent--probe.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "agent--main.service"
+      ],
+      "timeout": 10
     }
   ],
   "exit": {

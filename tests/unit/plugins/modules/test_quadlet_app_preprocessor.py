@@ -17,11 +17,22 @@ USERNS_BLOCK = (
     "UserNS=auto:size=65536"
 )
 STORAGE = "RequiresMountsFor=/var/lib/containers/storage"
+# The files of the app the tests preprocess for. Rule 1 prefixes only what the app defines.
+APP_FILES = {
+    "main.container", "db.container", "backup.container", "job.container", "x.kube",
+    "main.network", "backend.pod", "data.volume", "x.timer",
+}
+
+
+def preprocessor(**kwargs):
+    preprocessor = QuadletPreprocessor(APP, **kwargs)
+    preprocessor.app_files = set(APP_FILES)
+    return preprocessor
 
 
 @pytest.fixture
 def pre():
-    return QuadletPreprocessor(APP)
+    return preprocessor()
 
 
 class TestRule1PrefixResources:
@@ -67,8 +78,6 @@ class TestRule1PrefixResources:
             "Volume=%config%:/etc/x",
             "Image=docker.io/library/alpine",
             "Environment=Network=main.network",
-            # Spaces around "=" make the directive name "Network ", which is not recognised
-            "Network = main.network",
             "no equals sign here",
             "",
             "   ",
@@ -77,36 +86,100 @@ class TestRule1PrefixResources:
     def test_left_alone(self, pre, line):
         assert pre._apply_rule1_prefix_resources(line) == line
 
-    def test_volume_without_destination_gets_options_as_destination(self, pre):
-        # Pinned: the docs' own example. The options land where the destination would be.
-        assert pre._apply_rule1_prefix_resources("Volume=data.volume") == (
-            "Volume=app--data.volume:rw,Z,idmap"
-        )
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            # The services podman generates from the app's quadlets are the app's too
+            ("After=main-network.service", "After=app--main-network.service"),
+            ("Requires=data-volume.service", "Requires=app--data-volume.service"),
+            ("BindsTo=backend-pod.service", "BindsTo=app--backend-pod.service"),
+            ("Also=db.service", "Also=app--db.service"),
+            # Each unit of a list on its own merits, the spacing kept as written
+            ("After=db.service sshd.service x.service", "After=app--db.service sshd.service app--x.service"),
+            ("Wants=db.service\tbackup.service ", "Wants=app--db.service\tapp--backup.service "),
+            # A network with options
+            ("Network=main.network:ip=192.0.2.5", "Network=app--main.network:ip=192.0.2.5"),
+            # Without a destination there is nowhere for options to go: they would be read as one
+            ("Volume=data.volume", "Volume=app--data.volume"),
+            # A file saved with Windows line endings keeps a \r at the end of every line
+            ("Network=main.network\r", "Network=app--main.network\r"),
+            ("After=db.service sshd.service\r", "After=app--db.service sshd.service\r"),
+            ("Volume=data.volume:/d\r", "Volume=app--data.volume:/d:rw,Z,idmap\r"),
+        ],
+    )
+    def test_prefixed_where_the_app_defines_it(self, pre, line, expected):
+        assert pre._apply_rule1_prefix_resources(line) == expected
 
-    def test_network_with_options_is_not_prefixed(self, pre):
-        # Pinned: the value no longer ends in .network, so it is not recognised
-        line = "Network=main.network:ip=192.0.2.5"
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # A unit of the host
+            "After=sshd.service",
+            "Unit=logrotate.service",
+            # Another app's, written out in full
+            "Requires=other--db.service",
+            "Network=other--main.network",
+            "Pod=other--backend.pod",
+            "Volume=other--data.volume:/data",
+            # A name the app does not define, which podman's generator will report
+            "Network=missing.network",
+        ],
+    )
+    def test_left_alone_where_the_app_does_not_define_it(self, pre, line):
         assert pre._apply_rule1_prefix_resources(line) == line
 
-    def test_only_the_start_of_a_multi_unit_list_is_prefixed(self, pre):
-        # Pinned: the whole value is treated as one name
-        assert pre._apply_rule1_prefix_resources("After=a.service b.service") == (
-            "After=app--a.service b.service"
+
+class TestWhitespaceAroundEquals:
+    """systemd accepts `Key = value`; every rule must read it the same as `Key=value`."""
+
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            ("Network = main.network", "Network = app--main.network"),
+            ("Volume = data.volume:/data", "Volume = app--data.volume:/data:rw,Z,idmap"),
+            ("After\t=\tdb.service", "After\t=\tapp--db.service"),
+            ("  Requires =main.service", "  Requires =app--main.service"),
+        ],
+    )
+    def test_prefixing(self, pre, line, expected):
+        assert pre._apply_rule1_prefix_resources(line) == expected
+
+    def test_init_and_config_paths(self, pre):
+        assert pre._apply_rule2_replace_paths("Volume = %config%:/etc/x", "main") == (
+            "Volume = /srv/app/config/main:/etc/x:ro,Z,idmap"
         )
 
-    def test_units_from_outside_the_app_are_prefixed_too(self, pre):
-        # Pinned: there is no way to tell a host unit from an app unit
-        assert pre._apply_rule1_prefix_resources("After=sshd.service") == "After=app--sshd.service"
+    def test_userns_normalisation(self, pre):
+        assert pre._normalize_userns("UserNS = auto") == "UserNS = auto:size=65536"
 
-    def test_crlf_lines_are_not_prefixed(self, pre):
-        # Pinned: the trailing \r is part of the value, so it no longer ends in a known suffix
-        assert pre._apply_rule1_prefix_resources("Network=main.network\r") == "Network=main.network\r"
+    @pytest.mark.parametrize("directive", ["UserNS = host", "Pod = backend.pod"])
+    def test_default_userns_sees_spaced_directives(self, pre, directive):
+        out = pre.preprocess_quadlet_file(f"[Container]\nImage=x\n{directive}\n", "main.container")
+        assert "UserNS=auto" not in out
 
-    def test_crlf_volume_gets_options_after_the_carriage_return(self, pre):
-        # Pinned
-        assert pre._apply_rule1_prefix_resources("Volume=data.volume:/d\r") == (
-            "Volume=app--data.volume:/d\r:rw,Z,idmap"
-        )
+    def test_explicit_name_is_respected(self, pre):
+        content = "[Container]\nContainerName = custom\n"
+        assert pre._apply_rule3_inject_names(content, "main.container") == content
+
+    def test_storage_dependency_is_recognised(self, pre):
+        content = "[Unit]\nRequiresMountsFor = /var/lib/containers/storage\n"
+        assert pre._inject_unit_directives(content, []) == content
+
+    def test_mounted_volumes(self, pre):
+        assert pre.referenced_volumes("Volume = data.volume:/x") == ["data"]
+
+    def test_x_owner_is_stripped(self, pre):
+        assert pre._strip_directive("[Volume]\nX-Owner = 1:1\n", "X-Owner") == "[Volume]\n"
+
+    def test_timer_unit(self):
+        timer = preprocessor()
+        out = timer.preprocess_unit_file("[Timer]\nOnCalendar=daily\nUnit = job.container\n", "x.timer")
+        assert "Unit = app--job.service\n" in out
+        assert out.count("Unit") == 1
+
+    @pytest.mark.parametrize("line", ["Environment=X = y", "Exec=/bin/echo Network = main.network"])
+    def test_equals_inside_a_value_is_not_a_directive(self, pre, line):
+        assert pre._apply_rule1_prefix_resources(line) == line
 
 
 class TestRule2ReplacePaths:
@@ -129,6 +202,17 @@ class TestRule2ReplacePaths:
     )
     def test_replaced(self, pre, line, container, expected):
         assert pre._apply_rule2_replace_paths(line, container) == expected
+
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            # A file saved with Windows line endings keeps a \r at the end of every line
+            ("Volume=%config%:/x\r", "Volume=/srv/app/config/main:/x:ro,Z,idmap\r"),
+            ("Volume=%init%/sub:/y:ro\r", "Volume=/srv/app/init/main/sub:/y:ro\r"),
+        ],
+    )
+    def test_crlf(self, pre, line, expected):
+        assert pre._apply_rule2_replace_paths(line, "main") == expected
 
     def test_explicitly_empty_options_are_kept_empty(self, pre):
         # Pinned: an empty third field counts as "specified"
@@ -196,16 +280,18 @@ class TestRule3InjectNames:
         content = "# header\n[Kube]\nYaml=x.yaml\n"
         assert pre._apply_rule3_inject_names(content, "main.kube") == content
 
-    def test_lines_before_the_first_header_are_dropped(self, pre):
-        # Pinned bug: comments at the top of a .container/.volume never reach the host
+    def test_lines_before_the_first_header_are_kept(self, pre):
         content = "# Why this volume exists\n# and who owns it\n\n[Volume]\nDriver=local\n"
         assert pre._apply_rule3_inject_names(content, "data.volume") == (
-            "[Volume]\nVolumeName=app--data\nDriver=local\n"
+            "# Why this volume exists\n# and who owns it\n\n[Volume]\nVolumeName=app--data\n"
+            "Driver=local\n"
         )
 
-    def test_file_without_any_header_becomes_empty(self, pre):
-        # Pinned bug
-        assert pre._apply_rule3_inject_names("Image=x\nExec=y\n", "main.container") == ""
+    def test_file_without_any_header_is_kept_as_written(self, pre):
+        # Podman's generator rejects it, and says why, rather than it deploying empty
+        assert pre._apply_rule3_inject_names("Image=x\nExec=y\n", "main.container") == (
+            "Image=x\nExec=y\n"
+        )
 
     def test_header_with_inner_spaces_is_not_matched(self, pre):
         # Pinned: "[ Container ]" is a different section name to this code
@@ -307,15 +393,23 @@ class TestPreprocessQuadletFile:
             f"{USERNS_BLOCK}\n"
         )
 
+    def test_leading_comments_stay_first(self, pre):
+        content = "# What the app is for\n\n# The main container\n[Container]\nImage=x\n"
+        assert pre.preprocess_quadlet_file(content, "main.container") == (
+            f"# What the app is for\n\n[Unit]\n{STORAGE}\n\n"
+            "# The main container\n[Container]\nContainerName=app--main\nImage=x\n"
+            f"{USERNS_BLOCK}\n"
+        )
+
     def test_without_trailing_newline(self, pre):
         out = pre.preprocess_quadlet_file("[Network]\nDriver=bridge", "main.network")
         assert out == "[Network]\nNetworkName=app--main\nDriver=bridge"
 
-    def test_running_twice_prefixes_twice(self, pre):
-        # Pinned: preprocessing is not idempotent, so it must only ever run once per file
+    def test_a_prefixed_name_is_not_prefixed_again(self, pre):
+        # "app--main.network" is not a file of the app; the app's file is "main.network"
         once = pre.preprocess_quadlet_file("[Container]\nNetwork=main.network\n", "main.container")
         twice = pre.preprocess_quadlet_file(once, "main.container")
-        assert "Network=app--app--main.network" in twice
+        assert "Network=app--main.network\n" in twice
 
     def test_volume_init_ordering_only_for_owned_mounted_volumes(self):
         pre = QuadletPreprocessor(APP, volume_owners={"data": "1000:1000"})
@@ -338,6 +432,26 @@ class TestPreprocessQuadletFile:
         assert "volume-init" not in out
 
 
+class TestVolumeOwnership:
+    """A declared owner is also given to podman, which creates the volume owned by it."""
+
+    def test_declared_owner_becomes_user_and_group(self):
+        pre = QuadletPreprocessor(APP, volume_owners={"data": "1000:2000"})
+        out = pre.preprocess_quadlet_file("[Volume]\nDriver=local\nX-Owner=1000:2000\n", "data.volume")
+        assert out == "[Volume]\nVolumeName=app--data\nDriver=local\nUser=1000\nGroup=2000\n"
+
+    def test_volume_without_a_declared_owner_is_left_alone(self):
+        pre = QuadletPreprocessor(APP, volume_owners={"data": "0:0"})
+        out = pre.preprocess_quadlet_file("[Volume]\nDriver=local\n", "data.volume")
+        assert out == "[Volume]\nVolumeName=app--data\nDriver=local\n"
+
+    @pytest.mark.parametrize("explicit", ["User=5", "Group=5"])
+    def test_explicit_user_or_group_is_respected(self, explicit):
+        pre = QuadletPreprocessor(APP, volume_owners={"data": "1000:1000"})
+        out = pre.preprocess_quadlet_file(f"[Volume]\n{explicit}\nX-Owner=1000:1000\n", "data.volume")
+        assert out == f"[Volume]\nVolumeName=app--data\n{explicit}\n"
+
+
 class TestUserNS:
     @pytest.mark.parametrize(
         "line, expected",
@@ -346,6 +460,8 @@ class TestUserNS:
             ("UserNS=auto:gidmapping=0:1:5", "UserNS=auto:gidmapping=0:1:5,size=65536"),
             ("UserNS=auto ", "UserNS=auto:size=65536"),
             ("  UserNS=auto", "  UserNS=auto:size=65536"),
+            # Trailing whitespace goes, the \r of a Windows line ending with it
+            ("UserNS=auto\r", "UserNS=auto:size=65536"),
             # Pinned: anything starting with "auto" is treated as auto
             ("UserNS=autox", "UserNS=autox:size=65536"),
         ],
@@ -384,6 +500,12 @@ class TestUserNS:
     def test_commented_userns_does_not_count(self, pre):
         content = "[Container]\n#UserNS=host\n"
         assert pre._inject_default_userns(content) == f"[Container]\n#UserNS=host\n{USERNS_BLOCK}\n"
+
+    def test_container_in_a_pod_gets_no_default(self, pre):
+        """A container joining a pod shares the pod's user namespace; podman refuses another."""
+        out = pre.preprocess_quadlet_file("[Container]\nImage=x\nPod=backend.pod\n", "main.container")
+        assert "UserNS" not in out
+        assert "Pod=app--backend.pod" in out
 
     def test_without_container_section_one_is_opened_at_the_top(self, pre):
         # Pinned: [Container] ends up ahead of [Unit]
@@ -456,7 +578,7 @@ class TestReferencedVolumes:
             ("Volume=named:/x", []),
             ("Volume=main.network:/x", []),
             ("# Volume=data.volume:/x", []),
-            ("Volume = data.volume:/x", []),
+            ("Volume = data.volume:/x", ["data"]),
         ],
     )
     def test_stems(self, pre, content, expected):
@@ -508,6 +630,16 @@ class TestAppendToSection:
             # Missing section, opened at the top
             ("[Service]\nB=2\n", False, "[Unit]\nX=1\n\n[Service]\nB=2\n"),
             ("", False, "[Unit]\nX=1\n\n"),
+            # ... but below the comments that open the file
+            ("# The app\n\n[Service]\nB=2\n", False,
+             "# The app\n\n[Unit]\nX=1\n\n[Service]\nB=2\n"),
+            # ... and above a comment touching the first header, which is about that section
+            ("# The app\n\n# The service\n[Service]\nB=2\n", False,
+             "# The app\n\n[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n"),
+            ("# The service\n[Service]\nB=2\n", False,
+             "[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n"),
+            # A file of comments only
+            ("# Nothing yet\n", False, "# Nothing yet\n\n[Unit]\nX=1\n"),
             # Missing section, opened at the end, trailing blank lines moved before it
             ("[Service]\nB=2\n\n\n", True, "[Service]\nB=2\n\n[Unit]\nX=1\n"),
             ("", True, "[Unit]\nX=1\n"),

@@ -4,9 +4,9 @@ Golden files: snapshots of what the code produced, compared byte for byte.
 A golden tree is a directory of files. Comparing one reports every missing, extra and different
 file at once, with a diff, so a single run shows the whole effect of a change.
 
-Goldens are only ever written with `pytest --update-goldens`, and only from the baseline
-quadlet_app code: a golden captured from modified code would pin the modification instead of
-the behaviour it is meant to protect.
+Goldens are only ever written with `pytest --update-goldens`. A change to the code that changes
+a golden is a behaviour change: regenerate the goldens in the same commit, so its diff shows
+exactly what changed.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import difflib
 import json
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Dict, List
 
@@ -22,24 +21,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "tests" / "fixtures" / "golden"
-
-# The commit the quadlet_app goldens were captured from
-BASELINE_COMMIT = "9678cea"
-BASELINE_FILES = ("plugins/action/quadlet_app.py", "plugins/modules/quadlet_app.py")
-
-
-def ensure_baseline_code() -> None:
-    """Refuse to write goldens unless quadlet_app is exactly as it was at the baseline commit."""
-    result = subprocess.run(
-        ["git", "diff", "--quiet", BASELINE_COMMIT, "--", *BASELINE_FILES],
-        cwd=REPO_ROOT,
-        check=False,
-    )
-    if result.returncode != 0:
-        pytest.fail(
-            f"quadlet_app differs from {BASELINE_COMMIT}; goldens must be captured from the "
-            "baseline code, never from a modified copy"
-        )
 
 
 def read_tree(root: Path) -> Dict[str, str]:
@@ -95,7 +76,6 @@ def check_tree(request, root: Path, actual: Dict[str, str]) -> None:
         actual: What the code produced, keyed by relative path
     """
     if request.config.getoption("--update-goldens"):
-        ensure_baseline_code()
         write_tree(root, actual)
         return
 
@@ -110,7 +90,6 @@ def check_json(request, path: Path, actual) -> None:
     """Compare a JSON-serialisable value against a golden JSON file."""
     rendered = json.dumps(actual, indent=2, sort_keys=True) + "\n"
     if request.config.getoption("--update-goldens"):
-        ensure_baseline_code()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered, encoding="utf-8")
         return

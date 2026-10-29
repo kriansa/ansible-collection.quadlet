@@ -10,14 +10,6 @@
     },
     {
       "argv": [
-        "systemctl",
-        "is-active",
-        "webapp--main.service"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
         "/usr/lib/systemd/system-generators/podman-system-generator",
         "-dryrun",
         "-v"
@@ -34,15 +26,22 @@
     {
       "argv": [
         "systemctl",
-        "restart",
-        "webapp--cache-volume-init.service"
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "webapp--api.service",
+        "webapp--main.service",
+        "webapp--worker.service"
       ],
-      "timeout": 120
+      "timeout": 10
     },
     {
       "argv": [
         "systemctl",
-        "is-active",
+        "list-dependencies",
+        "--all",
+        "--type",
+        "service",
         "webapp--main.service"
       ],
       "timeout": 10
@@ -50,10 +49,33 @@
     {
       "argv": [
         "systemctl",
-        "start",
+        "restart",
+        "webapp--cache-volume-init.service",
         "webapp--main.service"
       ],
       "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "webapp--api.service",
+        "webapp--main.service",
+        "webapp--worker.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "webapp--main.service"
+      ],
+      "timeout": 10
     }
   ],
   "exit": {

@@ -13,4 +13,6 @@ Exec=/bin/sh -c 'find /target -mindepth 1 -print0 | xargs -0r chown -h 2000:2000
 Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=1800
+ExecStartPost=/usr/bin/mkdir -p /var/lib/quadlet-app
+ExecStartPost=/usr/bin/find /var/lib/quadlet-app -maxdepth 1 -regex '.*/edge-cases--data[.][^./]+_[^./]+[.]done' -delete
 ExecStartPost=/usr/bin/touch /var/lib/quadlet-app/edge-cases--data.2000_2000.done

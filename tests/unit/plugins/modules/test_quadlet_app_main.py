@@ -11,7 +11,10 @@ from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
 from ansible_collections.kriansa.commons.plugins.modules import quadlet_app
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import make_files_data
+from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+    make_files_data,
+    to_module_args,
+)
 
 SECRET = "s3cr3t-value-that-must-not-be-logged"
 
@@ -53,8 +56,10 @@ def test_defaults(capsys, captured_params):
         "state": "installed",
         "force": False,
         "systemctl_timeout": 120,
+        "settle_time": 5,
         "_control_node_processed": False,
-        "_files_data": None,
+        "_files": None,
+        "_contents": None,
     }
 
 
@@ -79,39 +84,39 @@ def test_check_mode_is_not_supported(capsys, captured_params):
     assert captured_params == {}
 
 
-def test_files_data_is_never_logged(capsys, captured_params, logged):
+def test_contents_are_never_logged_but_names_are(capsys, captured_params, logged):
     files = make_files_data(quadlets={"main.container": f"Environment=PW={SECRET}\n"})
-    call_main(capsys, {"src": "/apps/app", "_control_node_processed": True, "_files_data": files})
+    call_main(capsys, {"src": "/apps/app", "_control_node_processed": True, **to_module_args(files)})
 
     invocation = [message for message in logged if message.startswith("Invoked with")]
     assert invocation, logged
     assert SECRET not in invocation[0]
-    assert "_files_data=NOT_LOGGING_PARAMETER" in invocation[0]
+    assert "_contents=NOT_LOGGING_PARAMETER" in invocation[0]
+    assert "main.container" in invocation[0]
 
 
-def test_file_names_are_masked_in_the_result(capsys, fake_host, systemd):
+def test_file_names_are_readable_in_the_result(capsys, fake_host, systemd):
     """
-    Pinned bug: no_log hides every string inside _files_data wherever it appears in the output,
-    file names included. "main.container" is in every app, so this field is always mangled.
+    Only contents are no_log. Were names among them, Ansible would mask every occurrence of
+    "main.container" - and of "main", the config directory name - anywhere in the output.
     """
     files = make_files_data(quadlets={"main.container": "[Container]\nImage=alpine\n"},
                             config={"main": {"app.conf": "x=1\n"}})
     result = call_main(
         capsys,
-        {"src": "/apps/app", "_control_node_processed": True, "_files_data": files, "state": "installed"},
+        {"src": "/apps/app", "_control_node_processed": True, "state": "installed",
+         **to_module_args(files)},
     )
-    assert result["quadlet_files"] == ["app--********"]
-    # The config directory is named after the container, so "main" is hidden too
-    assert result["service_name"] == "app--********.service"
-
-
-def test_service_name_is_readable_without_a_main_config_dir(capsys, fake_host, systemd):
-    files = make_files_data(quadlets={"main.container": "[Container]\nImage=alpine\n"})
-    result = call_main(
-        capsys,
-        {"src": "/apps/app", "_control_node_processed": True, "_files_data": files, "state": "installed"},
-    )
+    assert result["quadlet_files"] == ["app--main.container"]
     assert result["service_name"] == "app--main.service"
+
+
+def test_files_and_contents_must_match_up(capsys, fake_host, systemd):
+    args = to_module_args(make_files_data(quadlets={"main.container": "[Container]\n"}))
+    args["_contents"].append("extra")
+    result = call_main(capsys, {"src": "/apps/app", "_control_node_processed": True, **args})
+    assert result["failed"] is True
+    assert result["msg"] == "_files and _contents must have the same length (1 and 2)"
 
 
 def test_documentation_matches_the_argument_spec(monkeypatch):

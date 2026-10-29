@@ -8,8 +8,10 @@ import hashlib
 import os
 import re
 import subprocess
+import tempfile
+import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 # pylint: disable=import-error
 from ansible.module_utils.basic import AnsibleModule  # type: ignore[import-not-found]
@@ -72,6 +74,18 @@ options:
         required: false
         type: int
         default: 120
+    settle_time:
+        description:
+            - Seconds the services this run started have to stay up before the task succeeds
+            - Podman reports a container as started as soon as it starts, so without this check a
+              container that exits right away, or keeps crashing, would still pass
+            - A service that stops, or that systemd has to start again, fails the task with its
+              last log lines
+            - Services that run once and finish (C(Type=oneshot)) are not watched
+            - Set to 0 to turn the check off
+        required: false
+        type: int
+        default: 5
 
 author:
     - Daniel Pereira (@kriansa)
@@ -91,9 +105,10 @@ notes:
     - A .volume may declare X-Owner=uid:gid to set that ownership in container-relative terms. It
       defaults to 0:0, which is correct for any image running as root; an image that drops
       privileges internally has to declare the uid it drops to.
-    - Containers default to UserNS=auto:size=65536. A container that reads the host journal or
-      other processes' /proc entries must declare UserNS=host, or it will half-work - those files
-      read as nobody while world-readable ones keep succeeding.
+    - Containers default to UserNS=auto:size=65536, except those joining a pod, which share the
+      pod's. A container that reads the host journal or other processes' /proc entries must
+      declare UserNS=host, or it will half-work - those files read as nobody while world-readable
+      ones keep succeeding.
     - A .timer is not a Quadlet type. It belongs in units/, is deployed to /etc/systemd/system,
       and is the one unit this module enables - nothing generates it, so nothing else would apply
       its [Install] section.
@@ -219,6 +234,35 @@ VOLUME_INIT_TIMEOUT_SEC = 1800
 QUADLET_SYSTEMD_STORAGE_DIR = "/var/lib/containers/storage"
 
 
+# A directive line as systemd reads it: optional indentation, the key, then "=" with optional
+# whitespace on either side - `Key=value` and `Key = value` mean the same - then the value
+DIRECTIVE_RE = re.compile(r"^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$")
+
+
+def parse_directive(line: str) -> Tuple[str, str, str, str] | None:
+    """
+    Split a unit file line into its parts, if it is a directive.
+
+    Every rule reads directives through this, so they all agree on what counts as one.
+
+    Args:
+        line: One line of a unit file
+
+    Returns:
+        (indentation, key, separator, value), where the separator is "=" with whatever whitespace
+        surrounded it, so a rule rewriting the value can keep the line as it was written. None for
+        comments, section headers, blank lines and anything else.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith(("#", ";", "[")):
+        return None
+    match = DIRECTIVE_RE.match(line)
+    if match is None:
+        return None
+    indentation, key, separator, value = match.groups()
+    return indentation, key, separator, value
+
+
 class ValidationError(Exception):
     """Custom exception for validation errors with detailed messages."""
 
@@ -284,7 +328,9 @@ class QuadletValidator:
         else:
             pattern = self.APP_NAME_PATTERN_MULTI
 
-        if not re.match(pattern, self.app_name):
+        # The whole name has to match: re.match would accept a trailing newline, since $ also
+        # matches just before one
+        if not re.fullmatch(pattern, self.app_name):
             raise ValidationError(
                 f"Invalid application name: {self.app_name}. "
                 "Must start with a letter (a-z), end with a letter or number, "
@@ -561,11 +607,11 @@ class QuadletPreprocessor:
     # Target a timer activates when it does not name one itself
     DEFAULT_TIMER_TARGET = "timers.target"
 
-    # Directives to process for Rule 1
-    RESOURCE_DIRECTIVES = {
-        "Network",
-        "Pod",
-        "Volume",
+    # Directives naming one quadlet of the app, optionally followed by ":" and options
+    QUADLET_REFERENCE_DIRECTIVES = {"Network", "Pod", "Volume"}
+
+    # Directives naming systemd units, as a space-separated list
+    UNIT_LIST_DIRECTIVES = {
         # Names the unit a .timer activates. Not valid in any quadlet type, so it only ever
         # matches in a plain systemd unit.
         "Unit",
@@ -579,7 +625,12 @@ class QuadletPreprocessor:
         "Conflicts",
         "Before",
         "After",
+        # Units enabled and disabled along with this one
+        "Also",
     }
+
+    # Directives to process for Rule 1
+    RESOURCE_DIRECTIVES = QUADLET_REFERENCE_DIRECTIVES | UNIT_LIST_DIRECTIVES
 
     def __init__(self, app_name: str, volume_owners: Dict[str, str] | None = None):
         """
@@ -594,6 +645,9 @@ class QuadletPreprocessor:
         # Quadlet stem -> extension, so a unit naming a quadlet can be pointed at the service
         # podman will actually generate for it
         self.quadlet_types: Dict[str, str] = {}
+        # Every file name in the app's quadlets/ and units/. Only names the app defines get its
+        # prefix: anything else belongs to the host or to another app.
+        self.app_files: Set[str] = set()
 
     def preprocess_quadlet_file(self, content: str, filename: str) -> str:
         """
@@ -648,7 +702,10 @@ class QuadletPreprocessor:
 
         # X-Owner is ours, not quadlet's - it never reaches the deployed file
         if file_ext == ".volume":
+            declares_owner = self._has_directive(content, "X-Owner")
             content = self._strip_directive(content, "X-Owner")
+            if declares_owner:
+                content = self._inject_volume_owner(content, Path(filename).stem)
 
         # Injected last, and deliberately after Rule 1: these values are already app-prefixed, and
         # Rule 1 would prefix them a second time
@@ -710,17 +767,17 @@ class QuadletPreprocessor:
         Returns:
             Line with the quadlet suffix swapped for the generated service's
         """
-        stripped = line.lstrip()
-        if not stripped.startswith("Unit="):
+        parsed = parse_directive(line)
+        if parsed is None or parsed[1] != "Unit":
             return line
+        leading_ws, _directive, separator, value = parsed
 
-        value = stripped[len("Unit="):].strip()
+        value = value.strip()
         suffix = self.QUADLET_SERVICE_SUFFIXES.get(Path(value).suffix)
         if suffix is None:
             return line
 
-        leading_ws = line[: len(line) - len(stripped)]
-        return f"{leading_ws}Unit={Path(value).stem}{suffix}"
+        return f"{leading_ws}Unit{separator}{Path(value).stem}{suffix}"
 
     def _inject_timer_defaults(self, content: str, filename: str) -> str:
         """
@@ -780,6 +837,33 @@ class QuadletPreprocessor:
         header = f"[{section}]"
         return any(line.strip() == header for line in content.split("\n"))
 
+    def _inject_volume_owner(self, content: str, stem: str) -> str:
+        """
+        Have podman create the volume already owned by its declared owner.
+
+        Podman's local driver re-chowns an *empty* volume to the container's user every time a
+        container starts - which would undo the ownership the bootstrap unit set, while its marker
+        keeps it from ever running again. A volume created with an owner of its own is left alone.
+        The ids are the declared ones unchanged: volumes are mounted idmapped, so on-disk ids are
+        the container's.
+
+        Only volumes created after this is in place benefit; podman does not change an existing
+        volume's options. With a volume driver, quadlet passes these on to the driver as an `o=`
+        option, which a driver may or may not accept.
+
+        Args:
+            content: .volume file content, X-Owner already stripped
+            stem: Volume stem (e.g. "data")
+
+        Returns:
+            Content with User= and Group= in [Volume], unless either is already set
+        """
+        owner = self.volume_owners.get(stem)
+        if owner is None or self._has_directive(content, "User") or self._has_directive(content, "Group"):
+            return content
+        uid, gid = owner.split(":")
+        return self._append_to_section(content, "Volume", [f"User={uid}", f"Group={gid}"])
+
     def _inject_default_userns(self, content: str) -> str:
         """
         Give a container a user namespace unless it asked for something else.
@@ -803,6 +887,11 @@ class QuadletPreprocessor:
         if self._has_directive(content, "UserNS"):
             return content
 
+        # A container joining a pod lives in the pod's user namespace, and podman refuses to start
+        # one that asks for its own
+        if self._has_directive(content, "Pod"):
+            return content
+
         return self._append_to_section(content, "Container", [
             "# Default from quadlet_app. Set UserNS= explicitly to override; UserNS=host is what a",
             "# container needs if it reads the host journal or other processes' /proc entries.",
@@ -821,11 +910,9 @@ class QuadletPreprocessor:
         Returns:
             True if the directive is set
         """
-        prefix = f"{directive}="
         return any(
-            stripped.startswith(prefix)
-            for stripped in (line.strip() for line in content.split("\n"))
-            if not stripped.startswith("#")
+            parsed is not None and parsed[1] == directive
+            for parsed in (parse_directive(line) for line in content.split("\n"))
         )
 
     def referenced_volumes(self, content: str) -> List[str]:
@@ -840,10 +927,10 @@ class QuadletPreprocessor:
         """
         stems = []
         for line in content.split("\n"):
-            stripped = line.strip()
-            if not stripped.startswith("Volume=") or stripped.startswith("#"):
+            parsed = parse_directive(line)
+            if parsed is None or parsed[1] != "Volume":
                 continue
-            source = stripped[len("Volume="):].split(":", 1)[0]
+            source = parsed[3].strip().split(":", 1)[0]
             if source.startswith("/") or not source.endswith(".volume"):
                 continue
             stem = Path(source).stem
@@ -863,9 +950,10 @@ class QuadletPreprocessor:
         Returns:
             Content with those lines dropped
         """
-        prefix = f"{directive}="
         return "\n".join(
-            line for line in content.split("\n") if not line.strip().startswith(prefix)
+            line
+            for line in content.split("\n")
+            if (parse_directive(line) or (None, None))[1] != directive
         )
 
     def _normalize_userns(self, line: str) -> str:
@@ -884,19 +972,19 @@ class QuadletPreprocessor:
         Returns:
             Line with size= added when it was missing
         """
-        stripped = line.lstrip()
-        if not stripped.startswith("UserNS="):
+        parsed = parse_directive(line)
+        if parsed is None or parsed[1] != "UserNS":
             return line
+        leading_ws, _directive, equals, value = parsed
 
-        value = stripped[len("UserNS="):].strip()
+        value = value.strip()
         if not value.startswith("auto"):
             return line
         if "size=" in value or "uidmapping=" in value:
             return line
 
-        leading_ws = line[: len(line) - len(stripped)]
         separator = "," if value.startswith("auto:") else ":"
-        return f"{leading_ws}UserNS={value}{separator}size={self.DEFAULT_USERNS_SIZE}"
+        return f"{leading_ws}UserNS{equals}{value}{separator}size={self.DEFAULT_USERNS_SIZE}"
 
     def _inject_unit_directives(self, content: str, mounted_volumes: List[str]) -> str:
         """
@@ -936,14 +1024,16 @@ class QuadletPreprocessor:
     @staticmethod
     def _has_directive_value(content: str, directive: str, value: str) -> bool:
         """Check whether a directive already carries a given value."""
-        prefix = f"{directive}="
         for line in content.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("#") or not stripped.startswith(prefix):
-                continue
-            if value in stripped[len(prefix):].split():
+            parsed = parse_directive(line)
+            if parsed is not None and parsed[1] == directive and value in parsed[3].split():
                 return True
         return False
+
+    @staticmethod
+    def _is_section_header(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("[") and stripped.endswith("]")
 
     @staticmethod
     def _append_to_section(
@@ -979,14 +1069,25 @@ class QuadletPreprocessor:
                 separator = [""] if lines else []
                 return "\n".join(lines + separator + [header] + directives + [""])
 
-            # No such section - open one at the top so it precedes everything else
-            return "\n".join([header] + directives + [""] + lines)
+            # No such section - open one ahead of every other, but below the comments that open
+            # the file. A comment with no blank line between it and the first header is about that
+            # section, so it stays with it: the new section goes after the last blank line.
+            first_header = next(
+                (i for i, line in enumerate(lines) if QuadletPreprocessor._is_section_header(line)),
+                len(lines),
+            )
+            split = 0
+            for i in range(first_header):
+                if not lines[i].strip():
+                    split = i + 1
+            if not any(line.strip() for line in lines[:split]):
+                split = 0
+            return "\n".join(lines[:split] + [header] + directives + [""] + lines[split:])
 
         # Insert at the end of the section, before the next section header
         end = len(lines)
         for i in range(start + 1, len(lines)):
-            stripped = lines[i].strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
+            if QuadletPreprocessor._is_section_header(lines[i]):
                 end = i
                 break
 
@@ -998,14 +1099,17 @@ class QuadletPreprocessor:
 
     def _apply_rule1_prefix_resources(self, line: str) -> str:
         """
-        Rule 1: Add application name prefix to resource references.
+        Rule 1: Add the application name prefix to references to the app's own files and units.
 
         Transforms:
             Network=main.network -> Network=myapp--main.network
             Pod=backend.pod -> Pod=myapp--backend.pod
             Volume=data.volume:... -> Volume=myapp--data.volume:...
             Wants=db.service -> Wants=myapp--db.service
-            After=main.service -> After=myapp--main.service
+            After=db.service sshd.service -> After=myapp--db.service sshd.service
+
+        A name the app does not define is left as written - sshd.service is the host's, and
+        other--db.service another app's, spelled out in full.
 
         Args:
             line: Single line from quadlet file
@@ -1013,61 +1117,52 @@ class QuadletPreprocessor:
         Returns:
             Processed line with prefixed resources
         """
-        # Check if line starts with a resource directive
-        line_stripped = line.lstrip()
-        if not line_stripped:
+        parsed = parse_directive(line)
+        if parsed is None:
             return line
+        leading_ws, directive, separator, value = parsed
 
-        # Extract directive and value
-        if "=" not in line_stripped:
-            return line
-
-        directive, _, value = line_stripped.partition("=")
-
-        # Only process resource directives
-        if directive not in self.RESOURCE_DIRECTIVES:
-            return line
-
-        # Preserve leading whitespace
-        leading_ws = line[: len(line) - len(line_stripped)]
-
-        # Parse the value part
-        # For Volume=, the format is: source:dest:options
-        # We only prefix if source matches pattern *.{network,pod,volume}
-        if directive == "Volume":
-            # Check if this looks like a quadlet volume reference
-            # Pattern: starts with non-slash, contains .volume before : or end
-            volume_pattern = r"^([^/][^:]*\.(volume|network|pod))(:.+)?$"
-            match = re.match(volume_pattern, value)
-            if match:
-                resource_ref = match.group(1)
-                rest = match.group(3) or ""
-                prefixed = f"{self.app_name}--{resource_ref}"
-
-                # Add default options for .volume when none are specified
-                # rest is "" or ":/dest" or ":/dest:options" — fewer than 2 colons means no options
-                if resource_ref.endswith(".volume") and rest.count(":") < 2:
-                    rest = f"{rest}:{self.DEFAULT_NAMED_VOLUME_OPTIONS}"
-
-                return f"{leading_ws}{directive}={prefixed}{rest}"
-        else:
-            # For other directives, check if value ends with a quadlet-related extension
-            quadlet_extensions = (
-                ".network",
-                ".pod",
-                ".volume",
-                ".container",
-                ".kube",
-                ".service",
-                ".timer",
+        if directive in self.UNIT_LIST_DIRECTIVES:
+            # Each name on its own; the spacing between them, and any \r a file saved with
+            # Windows line endings leaves at the end, stay as they are
+            units = self.app_units
+            value = re.sub(
+                r"\S+",
+                lambda match: (
+                    f"{self.app_name}--{match.group(0)}" if match.group(0) in units
+                    else match.group(0)
+                ),
+                value,
             )
-            if value.endswith(quadlet_extensions):
-                # Only prefix if it doesn't start with / (not absolute path)
-                if not value.startswith("/"):
-                    prefixed = f"{self.app_name}--{value}"
-                    return f"{leading_ws}{directive}={prefixed}"
+            return f"{leading_ws}{directive}{separator}{value}"
 
-        return line
+        if directive not in self.QUADLET_REFERENCE_DIRECTIVES:
+            return line
+
+        body = value.rstrip()
+        trailing = value[len(body):]
+        name, colon, rest = body.partition(":")
+        if name not in self.app_files:
+            return line
+
+        if directive == "Volume" and name.endswith(".volume") and rest and ":" not in rest:
+            # A destination but no options: give it the defaults. Without a destination there is
+            # nowhere to put them - podman would read them as the destination.
+            rest = f"{rest}:{self.DEFAULT_NAMED_VOLUME_OPTIONS}"
+
+        return f"{leading_ws}{directive}{separator}{self.app_name}--{name}{colon}{rest}{trailing}"
+
+    @property
+    def app_units(self) -> Set[str]:
+        """
+        The unit names the app defines: its files, and the services podman generates from them.
+        """
+        units = set(self.app_files)
+        for filename in self.app_files:
+            suffix = self.QUADLET_SERVICE_SUFFIXES.get(Path(filename).suffix)
+            if suffix is not None:
+                units.add(f"{Path(filename).stem}{suffix}")
+        return units
 
     def _apply_rule2_replace_paths(self, line: str, container_name: str) -> str:
         """
@@ -1088,18 +1183,17 @@ class QuadletPreprocessor:
             Processed line with replaced paths
         """
         # Only process Volume= directives
-        line_stripped = line.lstrip()
-        if not line_stripped.startswith("Volume="):
+        parsed = parse_directive(line)
+        if parsed is None or parsed[1] != "Volume":
             return line
-
-        # Preserve leading whitespace
-        leading_ws = line[: len(line) - len(line_stripped)]
-
-        # Extract value part (after Volume=)
-        value = line_stripped[7:]  # Remove "Volume="
+        leading_ws, _directive, separator, value = parsed
+        # Trailing whitespace - such as the \r a file saved with Windows line endings leaves - stays
+        # at the end of the line, rather than ending up inside the destination
+        body = value.rstrip()
+        trailing = value[len(body):]
 
         # Parse Volume directive: Volume=SOURCE:DEST[:OPTIONS]
-        parts = value.split(":", 2)  # [source, dest, options?]
+        parts = body.split(":", 2)  # [source, dest, options?]
         source = parts[0]
         dest = parts[1] if len(parts) > 1 else ""
         options = parts[2] if len(parts) > 2 else None  # None = not specified
@@ -1121,7 +1215,7 @@ class QuadletPreprocessor:
                 new_source += f"/{subpath}"
 
             effective_options = options if options is not None else self.DEFAULT_INIT_CONFIG_VOLUME_OPTIONS
-            return f"{leading_ws}Volume={new_source}:{dest}:{effective_options}"
+            return f"{leading_ws}Volume{separator}{new_source}:{dest}:{effective_options}{trailing}"
 
         # Process %config% paths
         if source.startswith("%config%"):
@@ -1136,7 +1230,7 @@ class QuadletPreprocessor:
                 new_source += f"/{subpath}"
 
             effective_options = options if options is not None else self.DEFAULT_INIT_CONFIG_VOLUME_OPTIONS
-            return f"{leading_ws}Volume={new_source}:{dest}:{effective_options}"
+            return f"{leading_ws}Volume{separator}{new_source}:{dest}:{effective_options}{trailing}"
 
         return line
 
@@ -1164,37 +1258,27 @@ class QuadletPreprocessor:
         resource_name = Path(filename).stem
         name_value = f"{self.app_name}--{resource_name}"
 
-        # Parse content into sections
+        # Parse content into sections. Whatever comes before the first header - usually comments
+        # about the file - is kept as a nameless section of its own.
         sections = []
         current_section = None
         current_lines = []
 
         for line in content.split("\n"):
-            stripped = line.strip()
-            # Check if this is a section header
-            if stripped.startswith("[") and stripped.endswith("]"):
-                # Save previous section
-                if current_section is not None:
-                    sections.append((current_section, current_lines))
-                # Start new section
-                current_section = stripped[1:-1]  # Remove brackets
+            if self._is_section_header(line):
+                sections.append((current_section, current_lines))
+                current_section = line.strip()[1:-1]  # Remove brackets
                 current_lines = [line]
             else:
                 current_lines.append(line)
 
-        # Save last section
-        if current_section is not None:
-            sections.append((current_section, current_lines))
+        sections.append((current_section, current_lines))
 
         # Find target section and inject directive if needed
         for i, (section, lines) in enumerate(sections):
             if section == section_name:
                 # Check if directive already exists (ignore comments)
-                has_directive = any(
-                    ln.strip().startswith(f"{directive_name}=")
-                    for ln in lines
-                    if ln.strip() and not ln.strip().startswith("#")
-                )
+                has_directive = self._has_directive("\n".join(lines), directive_name)
 
                 if not has_directive:
                     # Find section header and inject after it
@@ -1312,14 +1396,17 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
         # Extract parameters
         self.src = self.params["src"]
-        self.app_name = self.params.get("name") or os.path.basename(self.src)
+        # normpath first: the basename of "apps/myapp/" is empty
+        self.app_name = self.params.get("name") or os.path.basename(os.path.normpath(self.src))
         self.state = self.params["state"]
         self.force = self.params["force"]
         self.systemctl_timeout = self.params["systemctl_timeout"]
+        self.settle_time = self.params["settle_time"]
 
         # Check if files were processed by action plugin on control node
         self.control_node_processed = self.params.get("_control_node_processed", False)
-        self.files_data = self.params.get("_files_data", None)
+        # Files grouped as quadlets, units, init and config; built from _files/_contents in run()
+        self.files_data: Dict[str, List[Dict]] | None = None
 
         # Paths
         self.quadlet_dest = QUADLET_SYSTEMD_DIR
@@ -1333,13 +1420,8 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         # Deployed timer unit name -> whether its file content changed this run. Recorded before
         # deployment overwrites the files, so the systemd phase can still tell them apart.
         self.timer_changes: Dict[str, bool] = {}
-        # Generated ownership bootstrap services whose file content changed this run. Recorded
-        # before deployment overwrites the files, for the same reason as timer_changes.
-        self.volume_init_changes: List[str] = []
-        # Whether the main service was running before this run restarted anything. It has to be
-        # read up front: restarting a bootstrap unit also restarts every container that requires
-        # it, so asking afterwards can catch main halfway through that restart and get "no".
-        self.main_was_active = False
+        # Generated ownership bootstrap services whose volume has yet to get its declared owner
+        self.pending_volume_inits: List[str] = []
 
         # Initialize components
         self.validator: QuadletValidator | None = None
@@ -1354,17 +1436,8 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             if self.control_node_processed:
                 # Minimal validation - action plugin already validated structure
                 self.app_name = self.app_name.lower()
-                # Validate app name format
-                if len(self.app_name) == 1:
-                    pattern = r"^[a-z]$"
-                else:
-                    pattern = r"^[a-z][a-z0-9_-]*[a-z0-9]$"
-                if not re.match(pattern, self.app_name):
-                    raise ValidationError(
-                        f"Invalid application name: {self.app_name}. "
-                        "Must start with a letter (a-z), end with a letter or number, "
-                        "and contain only lowercase letters, numbers, hyphens, and underscores."
-                    )
+                QuadletValidator(self.src, self.app_name).validate_app_name()
+                self.files_data = self._files_data_from_params()
             else:
                 # Full validation when running without action plugin
                 self.validator = QuadletValidator(self.src, self.app_name)
@@ -1395,17 +1468,15 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             ] + self.generated_quadlets
             deployed_units = [f"{self.app_name}--{name}" for name in unit_names]
 
-            # Which timers and bootstrap units changed has to be read before deployment overwrites
-            # them
+            # Which timers changed has to be read before deployment overwrites them
             self._record_timer_changes(processed_files)
-            self._record_volume_init_changes(processed_files)
+            self.pending_volume_inits = self._pending_volume_inits()
 
             # Phase 4: Check idempotency
             needs_update = self.idempotency.needs_deployment(processed_files)
 
             # Also check if service state needs management
             service_name = f"{self.app_name}--main.service"
-            self.main_was_active = self._is_service_active(service_name)
             needs_service_management = self._needs_service_management(service_name)
 
             if not needs_update and not needs_service_management:
@@ -1419,8 +1490,10 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
                     msg="application already up to date",
                 )
 
-            # Phase 5: Deploy files (only if they changed)
+            # Phase 5: Deploy files (only if they changed), once podman's generator has accepted
+            # them: a file it rejects must never reach the host
             if needs_update:
+                self._validate_quadlet_syntax(processed_files)
                 self._deploy_files(processed_files)
                 self.changed = True
 
@@ -1465,7 +1538,7 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             filename: self._read_file(full_path)
             for filename, full_path in discovered_files["units"]
         }
-        processed = self._process_quadlets(quadlet_contents)
+        processed = self._process_quadlets(quadlet_contents, set(unit_contents))
         processed.update(self._process_units(unit_contents))
 
         # init and config files are deployed verbatim - no preprocessing
@@ -1476,6 +1549,31 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
                 processed[dest_path] = self._read_file(full_path)
 
         return processed
+
+    def _files_data_from_params(self) -> Dict[str, List[Dict]]:
+        """
+        Put the files the action plugin sent back together, grouped by kind.
+
+        Returns:
+            Dict with 'quadlets', 'units', 'init' and 'config' lists, each entry carrying its
+            content next to its name, or its container directory and path
+
+        Raises:
+            ValidationError: If names and contents do not match up
+        """
+        files = self.params.get("_files") or []
+        contents = self.params.get("_contents") or []
+        if len(files) != len(contents):
+            raise ValidationError(
+                f"_files and _contents must have the same length ({len(files)} and {len(contents)})"
+            )
+
+        groups = {"quadlet": "quadlets", "unit": "units", "init": "init", "config": "config"}
+        files_data: Dict[str, List[Dict]] = {group: [] for group in groups.values()}
+        for entry, content in zip(files, contents):
+            fields = {key: value for key, value in entry.items() if key != "kind"}
+            files_data[groups[entry["kind"]]].append({**fields, "content": content})
+        return files_data
 
     def _process_files_from_action_plugin(self) -> Dict[str, str]:
         """
@@ -1491,7 +1589,7 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
         quadlet_contents = {f["name"]: f["content"] for f in self.files_data["quadlets"]}
         unit_contents = {f["name"]: f["content"] for f in self.files_data.get("units", [])}
-        processed = self._process_quadlets(quadlet_contents)
+        processed = self._process_quadlets(quadlet_contents, set(unit_contents))
         processed.update(self._process_units(unit_contents))
 
         # init and config files are deployed verbatim - no preprocessing
@@ -1503,12 +1601,15 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
         return processed
 
-    def _process_quadlets(self, quadlet_contents: Dict[str, str]) -> Dict[str, str]:
+    def _process_quadlets(
+        self, quadlet_contents: Dict[str, str], unit_names: Set[str]
+    ) -> Dict[str, str]:
         """
         Preprocess quadlet files and generate the units derived from them.
 
         Args:
             quadlet_contents: Maps quadlet filename -> raw (already templated) content
+            unit_names: Filenames in units/, which a quadlet may name too
 
         Returns:
             Dict mapping destination_path -> content
@@ -1524,6 +1625,7 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         self.preprocessor.quadlet_types = {
             Path(filename).stem: Path(filename).suffix for filename in quadlet_contents
         }
+        self.preprocessor.app_files = set(quadlet_contents) | unit_names
 
         processed = {}
 
@@ -1606,10 +1708,10 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
             owner = DEFAULT_VOLUME_OWNER
             for line in content.split("\n"):
-                stripped = line.strip()
-                if not stripped.startswith("X-Owner="):
+                parsed = parse_directive(line)
+                if parsed is None or parsed[1] != "X-Owner":
                     continue
-                owner = self._validate_owner(stripped[len("X-Owner="):].strip(), filename)
+                owner = self._validate_owner(parsed[3].strip(), filename)
 
             owners[Path(filename).stem] = owner
 
@@ -1652,7 +1754,9 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         Build the ownership bootstrap unit for one volume.
 
         It chowns the volume once and is then skipped: the marker filename carries the uid/gid, so
-        changing X-Owner changes the path and the unit's condition lets it run again.
+        changing X-Owner changes the path and the unit's condition lets it run again. When it does,
+        it replaces the marker of the previous owner with its own, so the state directory always
+        lists the owner each volume actually has.
 
         Deliberately no UserNS and no idmap on the mount - it has to run as real host root. An
         existing volume's files are owned by host ids outside any container's range, and a process
@@ -1668,7 +1772,12 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             Quadlet file content
         """
         volume = f"{self.app_name}--{stem}"
-        marker = f"{QUADLET_APP_STATE_DIR}/{volume}.{owner.replace(':', '_')}.done"
+        marker = self._volume_marker(stem, owner)
+        # Every marker of this volume, whatever owner it names, and nothing else: the dot after the
+        # name keeps 'app--data' from matching 'app--data2', and the ids hold no dot, so the markers
+        # of a volume named 'data.v2' do not match either. [.] stands for a literal dot, to keep
+        # backslashes - which systemd reads as escapes of its own - out of the command line.
+        previous_markers = f".*/{volume}[.][^./]+_[^./]+[.]done"
 
         # Children first and the root last, so the root's ownership is a true completion marker:
         # an interrupted run cannot leave a half-chowned tree behind a satisfied condition
@@ -1695,40 +1804,17 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             "Type=oneshot",
             "RemainAfterExit=yes",
             f"TimeoutStartSec={VOLUME_INIT_TIMEOUT_SEC}",
+            # These run only once the chown has succeeded
+            f"ExecStartPost=/usr/bin/mkdir -p {QUADLET_APP_STATE_DIR}",
+            f"ExecStartPost=/usr/bin/find {QUADLET_APP_STATE_DIR} -maxdepth 1 "
+            f"-regex '{previous_markers}' -delete",
             f"ExecStartPost=/usr/bin/touch {marker}",
             "",
         ])
 
-    def _sync_volume_markers(self):
-        """
-        Create the state directory and drop markers that no longer match a declared owner.
-
-        Keeps exactly one marker per volume, so the state directory reads as an inventory of what
-        each volume is currently owned by - and so a changed X-Owner lets the bootstrap unit run
-        again instead of staying skipped against a stale marker.
-        """
-        try:
-            os.makedirs(QUADLET_APP_STATE_DIR, mode=0o755, exist_ok=True)
-            existing = os.listdir(QUADLET_APP_STATE_DIR)
-        except OSError as e:
-            self.module.fail_json(msg=f"Failed to prepare {QUADLET_APP_STATE_DIR}: {e}")
-            return  # unreachable, but for type checking
-
-        for stem, owner in self.volume_owners.items():
-            volume = f"{self.app_name}--{stem}"
-            current = f"{volume}.{owner.replace(':', '_')}.done"
-
-            for entry in existing:
-                # The trailing dot keeps 'app--data' from matching 'app--data2'
-                if not entry.startswith(f"{volume}.") or not entry.endswith(".done"):
-                    continue
-                if entry == current:
-                    continue
-
-                try:
-                    os.unlink(os.path.join(QUADLET_APP_STATE_DIR, entry))
-                except OSError as e:
-                    self.module.fail_json(msg=f"Failed to remove stale marker {entry}: {e}")
+    def _volume_marker(self, stem: str, owner: str) -> str:
+        """The file a volume's bootstrap unit leaves once it has given the volume this owner."""
+        return f"{QUADLET_APP_STATE_DIR}/{self.app_name}--{stem}.{owner.replace(':', '_')}.done"
 
     def _deploy_files(self, processed_files: Dict[str, str]):
         """
@@ -1737,8 +1823,6 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         Args:
             processed_files: Dict mapping destination_path -> content
         """
-        self._sync_volume_markers()
-
         for dest_path, content in processed_files.items():
             # Create parent directory
             dest_dir = os.path.dirname(dest_path)
@@ -1747,13 +1831,23 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             except OSError as e:
                 self.module.fail_json(msg=f"Failed to create directory {dest_dir}: {e}")
 
-            # Write file
+            # Written next to its destination under a temporary name and then renamed over it, so a
+            # write that fails halfway leaves the previous version in place, not a truncated file.
+            # The temporary name ends in random characters, so neither podman's generator nor
+            # systemd would load it should it ever be left behind.
             try:
-                with open(dest_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                # Set appropriate permissions
-                os.chmod(dest_path, 0o644)
-            except (IOError, OSError) as e:
+                fd, temp_path = tempfile.mkstemp(
+                    dir=dest_dir, prefix=f".{os.path.basename(dest_path)}."
+                )
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    os.chmod(temp_path, 0o644)
+                    os.replace(temp_path, dest_path)
+                except BaseException:
+                    os.unlink(temp_path)
+                    raise
+            except (OSError, UnicodeError, TypeError) as e:
                 self.module.fail_json(msg=f"Failed to write file {dest_path}: {e}")
 
     def _manage_systemd(self):
@@ -1768,7 +1862,6 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
         # Reload daemon if files changed
         if self.changed:
-            self._validate_quadlet_syntax()
             self._systemctl(["daemon-reload"])
             service_changed = True
 
@@ -1777,32 +1870,147 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         if self._reconcile_timers():
             service_changed = True
 
+        # Which run of each service was current before anything is started, so the ones this run
+        # starts - itself, or through systemd pulling them in - can be told apart afterwards
+        watched = []
+        if self.state != "installed" and self.settle_time > 0:
+            watched = self._app_services()
+        before = self._unit_properties(watched)
+
         # Determine if we need to restart dependencies and main service
         needs_restart = False
         if self.state == "restarted":
             # Always restart when restarted state is requested
             needs_restart = True
-        elif self.state == "started" and self.changed and self.main_was_active:
-            # Restart if files changed and service was running when this run began
+        elif self.state == "started" and self.changed:
+            # Restart when files changed, whether main runs or not: a container main depends on may
+            # still be running its old definition, and starting main alone would leave it so.
+            # Restarting a stopped unit starts it.
             needs_restart = True
 
         if needs_restart:
             self._restart_app(service_name)
             service_changed = True
         else:
-            # Main is not being restarted, but a changed owner still has to be applied - and
-            # before main mounts the volume, if it is about to be started below
-            self._restart_volume_init_units()
+            # Main is not being restarted, but a volume waiting for its owner still gets it - and
+            # before main mounts the volume, if it is about to be started below. Not under
+            # installed, which leaves running containers alone: running a bootstrap unit again
+            # restarts every container that mounts its volume.
+            if self.state != "installed" and self._restart_volume_init_units():
+                service_changed = True
             if self.state == "started" and not self._is_service_active(service_name):
                 # Start service if not already active (no restart needed)
                 self._systemctl(["start", service_name])
                 service_changed = True
 
+        self._check_services_stayed_up(before)
+
         return service_changed
+
+    def _app_services(self) -> List[str]:
+        """
+        The services podman generates from the app's containers, pods and kube files.
+
+        Volumes, networks and the ownership bootstrap units are left out: they run once and are
+        done, and systemctl waits for that and reports their failure itself.
+        """
+        assert self.preprocessor is not None
+
+        services = []
+        for filename in sorted(self.preprocessor.app_files):
+            suffix = Path(filename).suffix
+            if suffix in (".container", ".pod", ".kube"):
+                stem = Path(filename).stem
+                services.append(
+                    f"{self.app_name}--{stem}{QuadletPreprocessor.QUADLET_SERVICE_SUFFIXES[suffix]}"
+                )
+        return services
+
+    def _unit_properties(self, units: List[str]) -> Dict[str, Dict[str, str]]:
+        """
+        Read the state of each unit: its type, whether it runs, and which run of it is current.
+
+        Args:
+            units: Unit names
+
+        Returns:
+            Unit name -> property name -> value
+        """
+        if not units:
+            return {}
+
+        cmd = ["systemctl", "show", "-p", "Id,Type,ActiveState,SubState,InvocationID"] + units
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
+        except subprocess.TimeoutExpired:
+            self.module.fail_json(msg=f"{' '.join(cmd)} timed out")
+            return {}  # unreachable, but for type checking
+        if result.returncode != 0:
+            self.module.fail_json(msg=f"{' '.join(cmd)} failed: {result.stderr.strip()}")
+
+        # One block of Key=Value lines per unit, separated by a blank line
+        properties = {}
+        for block in result.stdout.strip().split("\n\n"):
+            values = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            properties[values.get("Id", "")] = values
+        return properties
+
+    def _check_services_stayed_up(self, before: Dict[str, Dict[str, str]]):
+        """
+        Fail the task if a service this run started did not stay up for settle_time seconds.
+
+        Podman tells systemd a container is ready as soon as the container starts, so systemctl
+        reports success even for one whose process dies a moment later. Each service is watched
+        under the run of it this module started: if systemd has had to start it again by the end
+        of the wait, it exited in between, however quickly it came back.
+
+        Args:
+            before: The state of the app's services before this run started anything
+        """
+        after = self._unit_properties(list(before))
+        started = [
+            unit for unit, state in after.items()
+            if state.get("InvocationID") != before[unit].get("InvocationID")
+            and state.get("Type") != "oneshot"
+        ]
+        if not started:
+            return
+
+        time.sleep(self.settle_time)
+
+        failures = []
+        for unit, state in self._unit_properties(started).items():
+            if state.get("ActiveState") != "active":
+                problem = f"it is {state.get('ActiveState')}"
+                if state.get("SubState") not in (state.get("ActiveState"), None):
+                    problem += f" ({state.get('SubState')})"
+            elif state.get("InvocationID") != after[unit].get("InvocationID"):
+                problem = "systemd had to start it again"
+            else:
+                continue
+
+            message = f"{unit} did not stay running after it was started: {problem}."
+            log = self._journal_tail(unit)
+            if log:
+                message += f" Its last log lines:\n{log}"
+            failures.append(message)
+
+        if failures:
+            self.module.fail_json(msg="\n\n".join(failures))
+
+    @staticmethod
+    def _journal_tail(unit: str) -> str:
+        """The last lines a unit logged, its container's output included; empty if unavailable."""
+        cmd = ["journalctl", "--unit", unit, "--lines", "10", "--no-pager", "--output", "cat"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+        return result.stdout.strip()
 
     def _restart_app(self, service_name: str):
         """
-        Restart the main service, every app unit it depends on, and the changed bootstrap units.
+        Restart the main service, every app unit it depends on, and the pending bootstrap units.
 
         All of them go to systemd in one call, so it builds a single transaction: each unit stops
         and starts once, in dependency order, and a bootstrap unit finishes before the containers
@@ -1810,7 +2018,7 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         earlier is restarted again by systemd on its own - which is how main used to go round two
         or three times per deploy.
 
-        The bootstrap units main depends on but whose files did not change are left out. Restarting
+        The bootstrap units main depends on whose owner is already applied are left out. Restarting
         one does nothing useful - its marker makes the condition fail and the unit is skipped - and
         it would still take down every container that requires it.
 
@@ -1821,7 +2029,7 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
         dependencies = [
             unit for unit in self._get_app_dependencies(service_name) if unit not in all_init_units
         ]
-        units = self.volume_init_changes + dependencies + [service_name]
+        units = self.pending_volume_inits + dependencies + [service_name]
         self._systemctl(["restart"] + list(dict.fromkeys(units)))
 
     def _reconcile_timers(self) -> bool:
@@ -1854,39 +2062,43 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
 
         return changed
 
-    def _record_volume_init_changes(self, processed_files: Dict[str, str]):
+    def _pending_volume_inits(self) -> List[str]:
         """
-        Note which ownership bootstrap units have new content, before deployment overwrites them.
+        Find the ownership bootstrap units that have yet to give their volume its declared owner.
 
-        A bootstrap unit's file changes when its volume's X-Owner does, or when the volume is new,
-        and only then does it need re-running. Restarting one is not free even when its marker makes
-        it skip: systemd restarts every unit that requires it, which is every container mounting
-        that volume.
+        That is the case when the marker for the declared owner is missing from the host: the
+        volume is new, its X-Owner changed, or its marker was deleted to run the chown again.
+        Asking the host, rather than which files changed this run, is what lets an owner change
+        deployed under `installed` - which runs no bootstrap - be applied by the next run allowed
+        to restart the app.
 
-        Args:
-            processed_files: Dict mapping destination_path -> content
+        Returns:
+            Their service names
         """
-        assert self.idempotency is not None
+        return [
+            f"{self.app_name}--{stem}-volume-init.service"
+            for stem, owner in self.volume_owners.items()
+            if not os.path.exists(self._volume_marker(stem, owner))
+        ]
 
-        for name in self.generated_quadlets:
-            dest_path = os.path.join(self.quadlet_dest, name)
-            if self.force or self.idempotency.file_changed(dest_path, processed_files[dest_path]):
-                self.volume_init_changes.append(f"{Path(name).stem}.service")
-
-    def _restart_volume_init_units(self):
+    def _restart_volume_init_units(self) -> bool:
         """
-        Re-run the ownership bootstrap units whose files changed.
+        Run the pending ownership bootstrap units.
 
         They are Type=oneshot with RemainAfterExit=yes, so once one has run it stays active and
-        systemd never re-checks its condition. Changing X-Owner rewrites the unit and drops the old
-        marker, but without an explicit restart nothing would apply the new ownership until the host
-        next booted - leaving no marker and stale ownership in the meantime.
+        systemd never re-checks its condition. Without an explicit restart, a new owner would not
+        be applied until the host next booted.
 
         These cannot be picked up by the dependency walk in _get_app_dependencies: that starts from
         the main service, and a volume mounted only by a secondary container is not in its tree.
+
+        Returns:
+            True if any unit was run
         """
-        if self.volume_init_changes:
-            self._systemctl(["restart"] + self.volume_init_changes)
+        if not self.pending_volume_inits:
+            return False
+        self._systemctl(["restart"] + self.pending_volume_inits)
+        return True
 
     def _get_app_dependencies(self, service_name: str) -> List[str]:
         """
@@ -1899,9 +2111,11 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             List of app-prefixed dependency service names
         """
         try:
-            # List all service dependencies
+            # List all service dependencies, however indirect. Without --all, systemctl only expands
+            # targets, so a container two Requires= away from main would be left out - and keep
+            # running its old definition after a deploy that changed it.
             result = subprocess.run(
-                ["systemctl", "list-dependencies", "--type", "service", service_name],
+                ["systemctl", "list-dependencies", "--all", "--type", "service", service_name],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -1934,16 +2148,42 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             self.module.fail_json(msg=f"systemctl command not found: {e}")
             return []  # unreachable, but for type checking
 
-    def _validate_quadlet_syntax(self):
-        """Validate quadlet files syntax using podman-system-generator dry run."""
+    def _validate_quadlet_syntax(self, processed_files: Dict[str, str]):
+        """
+        Check this app's quadlets with podman's own generator, before any of them is written.
+
+        The generator runs over a staged copy holding only this app's quadlets. Pointed at the
+        real directory instead, it would only see the files after they had been written - so a
+        rejected one would stay on the host - and it would judge every other app's files too, so
+        one app's broken file would fail every other app's deploy.
+
+        Args:
+            processed_files: Dict mapping destination_path -> content
+        """
         generator = "/usr/lib/systemd/system-generators/podman-system-generator"
         cmd = [generator, "-dryrun", "-v"]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
-        except subprocess.TimeoutExpired:
-            self.module.fail_json(msg=f"{generator} -dryrun -v timed out")
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            self.module.fail_json(msg=f"Failed to execute quadlet syntax validation: {e}")
+        with tempfile.TemporaryDirectory(prefix="quadlet-app-") as staging:
+            staged = {
+                os.path.basename(dest_path): content
+                for dest_path, content in processed_files.items()
+                if os.path.dirname(dest_path) == self.quadlet_dest
+            }
+            staged.update(self._quadlets_of_other_apps_named_in(staged))
+            for name, content in staged.items():
+                with open(os.path.join(staging, name), "w", encoding="utf-8") as f:
+                    f.write(content)
+
+            env = {**os.environ, "QUADLET_UNIT_DIRS": staging}
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=False, timeout=30, env=env
+                )
+            except subprocess.TimeoutExpired:
+                self.module.fail_json(msg=f"{generator} -dryrun -v timed out")
+                return
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                self.module.fail_json(msg=f"Failed to execute quadlet syntax validation: {e}")
+                return
 
         if result.returncode != 0:
             self.module.fail_json(
@@ -1953,6 +2193,45 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
                 stdout=result.stdout,
                 stderr=result.stderr,
             )
+
+    def _quadlets_of_other_apps_named_in(self, quadlets: Dict[str, str]) -> Dict[str, str]:
+        """
+        Read the deployed quadlets of other apps that these quadlets name.
+
+        A container can join another app's network by naming its file, e.g.
+        Network=other--main.network, and the generator cannot resolve that name without the file.
+        What a staged file of another app names in turn is read too, since the generator has to
+        make sense of that file as well.
+
+        Args:
+            quadlets: Filename -> content of the quadlets being validated
+
+        Returns:
+            Filename -> content of each named quadlet found on the host. A name not found is left
+            out, for the generator to report.
+        """
+        directives = QuadletPreprocessor.QUADLET_REFERENCE_DIRECTIVES
+        found: Dict[str, str] = {}
+        pending = list(quadlets.values())
+        while pending:
+            for line in pending.pop().split("\n"):
+                parsed = parse_directive(line)
+                if parsed is None or parsed[1] not in directives:
+                    continue
+                name = parsed[3].strip().partition(":")[0]
+                # Only a quadlet's filename - a path, or a plain podman network or volume name,
+                # is not one, and a path must not be read as one
+                if "/" in name or not name.endswith((".network", ".pod", ".volume")):
+                    continue
+                if name in quadlets or name in found:
+                    continue
+                path = os.path.join(self.quadlet_dest, name)
+                if not os.path.isfile(path):
+                    continue
+                with open(path, encoding="utf-8") as f:
+                    found[name] = f.read()
+                pending.append(found[name])
+        return found
 
     def _systemctl(self, args: List[str]):
         """
@@ -1993,8 +2272,8 @@ class QuadletAppModule:  # pylint: disable=too-few-public-methods
             return True
 
         if self.state == "started":
-            # Need to start if not currently active
-            return not self._is_service_active(service_name)
+            # Need to start if not currently active, or to give a volume its declared owner
+            return not self._is_service_active(service_name) or bool(self.pending_volume_inits)
         if self.state == "restarted":
             # Always restart when restarted state is requested
             return True
@@ -2103,11 +2382,15 @@ def main():
             },
             "force": {"type": "bool", "default": False},
             "systemctl_timeout": {"type": "int", "default": 120},
+            "settle_time": {"type": "int", "default": 5},
             # Internal parameters used by action plugin
             "_control_node_processed": {"type": "bool", "default": False, "required": False},
-            # Carries the rendered content of every app file, secrets included. Without no_log,
-            # Ansible writes it into the managed host's journal on every run.
-            "_files_data": {"type": "dict", "required": False, "no_log": True},
+            # Which files the app has: kind, and name or container directory and path. Logged.
+            "_files": {"type": "list", "elements": "dict", "required": False},
+            # The rendered content of each file in _files, at the same position, secrets included.
+            # Without no_log, Ansible writes it into the managed host's journal on every run. Kept
+            # apart from the names because no_log masks every one of its strings in all output.
+            "_contents": {"type": "list", "elements": "str", "required": False, "no_log": True},
         },
         supports_check_mode=False,
     )

@@ -93,15 +93,13 @@ class TestValidateAppName:
             "a--b",
             # Upper case is accepted because it is lowercased first
             "MyApp",
-            # Pinned: `$` also matches before a trailing newline, so this passes the regex
-            "ab\n",
         ],
     )
     def test_valid(self, name):
         QuadletValidator("unused", name).validate_app_name()
 
     @pytest.mark.parametrize(
-        "name", ["", "1", "1a", "-a", "a-", "a_", "a.b", "a b", "_a", "ä", "a/b"]
+        "name", ["", "1", "1a", "-a", "a-", "a_", "a.b", "a b", "_a", "ä", "a/b", "ab\n", "a\n"]
     )
     def test_invalid(self, name):
         with pytest.raises(ValidationError) as excinfo:

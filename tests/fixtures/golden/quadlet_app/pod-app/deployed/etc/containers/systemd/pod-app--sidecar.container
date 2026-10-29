@@ -7,6 +7,3 @@ RequiresMountsFor=/var/lib/containers/storage
 ContainerName=pod-app--sidecar
 Image=ghcr.io/example/redis-exporter:1
 Pod=pod-app--backend.pod
-# An explicit empty UserNS= keeps the module's default out: a container joining a pod cannot have a
-# user namespace of its own
-UserNS=

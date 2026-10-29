@@ -16,7 +16,10 @@ from ansible.template import trust_as_template
 from ansible_collections.kriansa.commons.plugins.action import quadlet_app as action_plugin
 from ansible_collections.kriansa.commons.plugins.modules import quadlet_app as module
 from ansible_collections.kriansa.commons.tests.unit._support.action import make_action, run_action
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import files_data_to_tree
+from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+    files_data_to_tree,
+    from_module_args,
+)
 
 ActionModule = action_plugin.ActionModule
 
@@ -51,7 +54,7 @@ def deploy(playbook_dir, files, *, src="myapp", task_vars=None, **kwargs):
 
 def rendered(run):
     assert run.module_args is not None, run.result
-    return files_data_to_tree(run.module_args["_files_data"])
+    return files_data_to_tree(from_module_args(run.module_args))
 
 
 MAIN = {"quadlets/main.container": "[Container]\nImage=alpine\n"}
@@ -67,12 +70,9 @@ class TestRun:
             "state": "started",
             "systemctl_timeout": 5,
             "_control_node_processed": True,
-            "_files_data": {
-                "quadlets": [{"name": "main.container", "content": "[Container]\nImage=alpine\n"}],
-                "units": [],
-                "init": [],
-                "config": [],
-            },
+            # Names are logged; contents are no_log and matched to the names by position
+            "_files": [{"kind": "quadlet", "name": "main.container"}],
+            "_contents": ["[Container]\nImage=alpine\n"],
         }
 
     def test_module_gets_the_original_task_vars(self, playbook_dir):
@@ -89,7 +89,7 @@ class TestRun:
         write(playbook_dir / "myapp", MAIN)
         action, captured = make_action(ActionModule, basedir=playbook_dir, args={"src": "myapp"})
         action.run(task_vars=None)
-        assert captured["module_args"]["_files_data"]["quadlets"][0]["name"] == "main.container"
+        assert from_module_args(captured["module_args"])["quadlets"][0]["name"] == "main.container"
 
     @pytest.mark.parametrize("args", [{}, {"src": ""}, {"src": None}])
     def test_src_is_required(self, playbook_dir, args):
@@ -170,6 +170,11 @@ class TestName:
                      args={"name": "Prod-DB"})
         assert rendered(run)["quadlets/main.container"] == "N=prod-db\n"
 
+    def test_from_src_with_a_trailing_slash(self, playbook_dir):
+        run = deploy(playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
+                     src="myapp/")
+        assert rendered(run)["quadlets/main.container"] == "N=myapp\n"
+
     def test_name_beats_a_variable_of_the_same_name(self, playbook_dir):
         run = deploy(playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
                      task_vars={"quadlet_app_name": "other"})
@@ -179,7 +184,7 @@ class TestName:
 class TestDiscovery:
     def test_absent_directories(self, playbook_dir):
         run = deploy(playbook_dir, MAIN)
-        assert run.module_args["_files_data"] == {
+        assert from_module_args(run.module_args) == {
             "quadlets": [{"name": "main.container", "content": "[Container]\nImage=alpine\n"}],
             "units": [], "init": [], "config": [],
         }
@@ -189,13 +194,13 @@ class TestDiscovery:
                  ["main.container", "a.network", "b.volume", "c.pod", "d.kube", "README.md"]}
         files["quadlets/sub.container/x"] = ""
         run = deploy(playbook_dir, files)
-        assert [f["name"] for f in run.module_args["_files_data"]["quadlets"]] == [
+        assert [f["name"] for f in from_module_args(run.module_args)["quadlets"]] == [
             "a.network", "b.volume", "c.pod", "d.kube", "main.container"
         ]
 
     def test_units_sorted(self, playbook_dir):
         run = deploy(playbook_dir, {**MAIN, "units/b.timer": "", "units/a.timer": ""})
-        assert [f["name"] for f in run.module_args["_files_data"]["units"]] == ["a.timer", "b.timer"]
+        assert [f["name"] for f in from_module_args(run.module_args)["units"]] == ["a.timer", "b.timer"]
 
     def test_stray_unit_is_rejected_with_the_modules_message(self, playbook_dir):
         run = deploy(playbook_dir, {**MAIN, "units/x.service": ""})
@@ -209,7 +214,7 @@ class TestDiscovery:
         run = deploy(playbook_dir, {**MAIN, f"{kind}/README": "top level, ignored",
                                     f"{kind}/main/a": "1", f"{kind}/main/sub/b": "2",
                                     f"{kind}/main.container/c": "3"})
-        entries = run.module_args["_files_data"][kind]
+        entries = from_module_args(run.module_args)[kind]
         assert sorted((e["container"], e["path"], e["content"]) for e in entries) == [
             ("main", "a", "1"), ("main", "sub/b", "2"),
             # Raw directory name: the module strips the suffix later
@@ -284,20 +289,33 @@ class TestTemplating:
                                        task_vars={"v": "abc"})
         action._loader.set_vault_secrets(secret)
         action.run(task_vars={"v": "abc"})
-        assert captured["module_args"]["_files_data"]["config"] == [
+        assert from_module_args(captured["module_args"])["config"] == [
             {"container": "main", "path": "secret.env", "content": "TOKEN=abc\n"}
         ]
 
-    def test_invalid_utf8_is_escaped_not_rejected(self, playbook_dir):
-        # Pinned: ansible-core decodes with surrogate escapes (deprecated, removed in 2.23), so the
-        # plugin's own UnicodeDecodeError branch never fires
-        out = self.render_one(playbook_dir, b"a\xffb")
-        assert out == "a\udcffb"
+    def test_invalid_utf8_is_rejected(self, playbook_dir):
+        # ansible-core reads it anyway, with the bad bytes escaped, and only warns
+        run = deploy(playbook_dir, {"quadlets/main.container": b"[Container]\na\xffb\n"})
+        path = playbook_dir / "myapp/quadlets/main.container"
+        assert run.result["failed"] is True
+        assert run.result["msg"] == (
+            f"Failed to process files on control node: File {path} is not valid UTF-8: "
+            "'utf-8' codec can't decode byte 0xff in position 13: invalid start byte"
+        )
+        assert run.module_args is None
 
-    @pytest.mark.parametrize("content, value", [("{{ n }}", 42), ("{{ n }}\n", 42), ("{{ l }}", [1, 2])])
-    def test_a_bare_expression_renders_to_its_native_type(self, playbook_dir, content, value):
-        # Pinned: the module then fails writing a non-string
-        assert self.render_one(playbook_dir, content, task_vars={"n": 42, "l": [1, 2]}) == value
+    @pytest.mark.parametrize("content, text", [
+        ("{{ n }}", "42"),
+        # Lost, as with Ansible's template module: the file renders to the number alone
+        ("{{ n }}\n", "42"),
+        ("{{ l }}", "[1, 2]"),
+        ("{{ none }}", ""),
+    ])
+    def test_a_bare_expression_is_written_as_text(self, playbook_dir, content, text):
+        # A file that is one expression renders to its value, which is turned into text the way
+        # Ansible's template module does it
+        out = self.render_one(playbook_dir, content, task_vars={"n": 42, "l": [1, 2], "none": None})
+        assert out == text
 
 
 def test_extension_lists_match_the_module():
@@ -308,12 +326,12 @@ def test_extension_lists_match_the_module():
 def test_app_without_quadlets_directory_is_sent_anyway(playbook_dir):
     # Pinned: the plugin requires nothing; the module then reports "already up to date"
     run = deploy(playbook_dir, {"config/main/a": "x"})
-    assert run.module_args["_files_data"]["quadlets"] == []
+    assert from_module_args(run.module_args)["quadlets"] == []
 
 
 def test_subdirectories_in_units_are_skipped(playbook_dir):
     run = deploy(playbook_dir, {**MAIN, "units/a.timer": "", "units/nested/b.timer": ""})
-    assert [f["name"] for f in run.module_args["_files_data"]["units"]] == ["a.timer"]
+    assert [f["name"] for f in from_module_args(run.module_args)["units"]] == ["a.timer"]
 
 
 def test_decode_error_message(playbook_dir, monkeypatch):

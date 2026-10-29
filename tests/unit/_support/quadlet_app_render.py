@@ -12,11 +12,12 @@ from typing import Any, Dict, List
 
 from ansible_collections.kriansa.commons.plugins.action import quadlet_app as action_plugin
 from ansible_collections.kriansa.commons.tests.unit._support.action import run_action
+from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import from_module_args
 
 
 def render_app(app_dir: Path, task_vars: Dict[str, Any], **args) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Stage A: run the action plugin over an app and return the `_files_data` it sends.
+    Stage A: run the action plugin over an app and return the files it sends, grouped.
 
     The app is referenced relative to its parent directory, the way a playbook names
     `podman-apps/<app>`, so path resolution is exercised too.
@@ -29,4 +30,4 @@ def render_app(app_dir: Path, task_vars: Dict[str, Any], **args) -> Dict[str, Li
     )
     if run.module_args is None:
         raise AssertionError(f"the action plugin never called the module: {run.result}")
-    return run.module_args["_files_data"]
+    return from_module_args(run.module_args)

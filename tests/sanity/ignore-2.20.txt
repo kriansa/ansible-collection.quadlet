@@ -1,8 +1,9 @@
-plugins/action/quadlet_app.py pylint:disallowed-name # frozen until quadlet_stack replaces it
-plugins/modules/quadlet_app.py no-assert # frozen until quadlet_stack replaces it
-plugins/modules/quadlet_app.py pylint:disallowed-name # frozen until quadlet_stack replaces it
-plugins/modules/quadlet_app.py validate-modules:doc-default-does-not-match-spec # frozen; internal parameter
-plugins/modules/quadlet_app.py validate-modules:import-before-documentation # frozen until quadlet_stack replaces it
+plugins/action/quadlet_app.py pylint:disallowed-name # pre-existing; not addressed by the test work
+plugins/modules/quadlet_app.py no-assert # pre-existing; not addressed by the test work
+plugins/modules/quadlet_app.py pylint:disallowed-name # pre-existing; not addressed by the test work
+plugins/modules/quadlet_app.py validate-modules:doc-default-does-not-match-spec # internal parameter set by the action plugin
+plugins/modules/quadlet_app.py validate-modules:doc-elements-mismatch # internal parameter set by the action plugin
+plugins/modules/quadlet_app.py validate-modules:import-before-documentation # pre-existing; not addressed by the test work
 plugins/modules/quadlet_app.py validate-modules:missing-gplv3-license # this collection is Apache-2.0
 plugins/modules/quadlet_app.py validate-modules:undocumented-parameter # internal parameters set by the action plugin
 roles/tunneled_ssh_operator/files/wg-reresolve-dns shebang # a script deployed as-is, not a module

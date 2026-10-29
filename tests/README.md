@@ -14,7 +14,7 @@ make ansible-test-units # the unit tests, run the way ansible-test runs them
 | Layer | Where | What it proves |
 |---|---|---|
 | Unit | `tests/unit/plugins/{modules,action}/` | Every branch of the module and action plugin, error paths included, with systemd faked |
-| Golden | `tests/unit/plugins/test_quadlet_app_golden.py` | The example apps in `tests/fixtures/apps/` render and deploy exactly as they did at the baseline |
+| Golden | `tests/unit/plugins/test_quadlet_app_golden.py` | The example apps in `tests/fixtures/apps/` render and deploy exactly as their goldens record |
 | Validity | `tests/unit/plugins/test_quadlet_app_dryrun.py` | Every golden output is accepted by podman's own quadlet generator |
 | Integration | `tests/integration/` | Real deploys to a real host: systemd transactions, idmapped volumes, SELinux, timers |
 | Sanity | `make sanity` | ansible-test's static checks |
@@ -37,9 +37,9 @@ Golden files live in `tests/fixtures/golden/quadlet_app/<app>/`:
 - `deployed/` is every file the module writes on a fresh host, at its real path (Stage B)
 - `result.json` is the module's result and every command it runs (Stage B)
 
-They pin current behaviour, bugs included. They were captured from quadlet_app at commit `9678cea`,
-and `make goldens` refuses to rewrite them from any other version of that code. A golden diff is a
-behaviour change, never noise.
+They pin current behaviour. A golden diff is a behaviour change, never noise: a commit that changes
+what the module produces regenerates the goldens with `make goldens`, so its diff shows exactly
+what changed.
 
 ### The example apps
 
@@ -101,23 +101,6 @@ missing.
 Tests marked "Pinned" record what the code does today even where that is wrong, so that changing
 it is a visible, deliberate act. The notable ones, all verified on a real host:
 
-- Comments above the first section header of a `.container`, `.volume`, `.network` or `.pod` are
-  dropped; a file with no header deploys empty.
-- Only main's direct dependencies are restarted on a change; one two `Requires=` away keeps its
-  old definition.
-- `state: installed` still runs the volume ownership bootstrap.
-- Validation runs after files are written, and covers every app on the host: a broken file fails
-  the deploy of every other app, and a failed run leaves its own files behind, so a retry skips
-  validation and fails on a unit systemd never loaded - only a file change or `force` recovers.
-- `no_log` on the module's file data masks every string in it wherever it appears in the
-  output: `quadlet_files`, `unit_files`, and error messages naming a file read `********`.
-- A file that renders to a bare value (`{{ 42 }}`) fails the module; a non-UTF-8 file fails it
-  mid-write and leaves the file empty.
-- With podman's local volume driver, an empty volume's root is re-chowned to the container's
-  user on every container start, undoing `X-Owner`. Volume drivers are exempt, which is why hosts
-  using one are not affected.
-- The injected `UserNS=auto` makes every container that joins a `.pod` fail to start; an empty
-  `UserNS=` in the container avoids it.
-- A container that exits right after starting does not fail the deploy: quadlet containers
-  report ready when they start.
-- Nothing is ever removed from the host: deleted files, volumes and timers stay deployed.
+- Nothing is ever removed from the host: deleted files, volumes and timers stay deployed. This one
+  is by design - as with any Ansible module, removing what is no longer wanted is the playbook's
+  job.

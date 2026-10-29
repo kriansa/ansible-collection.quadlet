@@ -140,6 +140,82 @@ def test_installed_while_running_does_not_restart(make_app, host):
     assert "VERSION=1" in env
 
 
+def test_directives_written_with_spaces_around_equals(make_app, host):
+    """systemd reads `Key = value` like `Key=value`, and so must every rule of the module."""
+    app = make_app("spaced")
+    app.write("quadlets/main.container",
+              f"[Container]\n{IMAGE}\n{IDLE}\nNetwork = app.network\nVolume = data.volume:/data\n"
+              "UserNS = host\n")
+    app.write("quadlets/app.network", "[Network]\n")
+    app.write("quadlets/data.volume", "[Volume]\nX-Owner = 10:10\n")
+    mountpoint = host.seed_volume(f"{app.name}--data")
+
+    step = app.deploy("started")
+
+    assert not step.failed, step.msg
+    assert f"{app.name}--app" in host.inspect(app.container("main"))["NetworkSettings"]["Networks"]
+    assert host.uid_map(app.container("main")) == [[0, 0, 4294967295]]
+    assert host.stat(f"{mountpoint}/seed").owner == "10:10"
+
+
+def test_only_names_the_app_defines_are_prefixed(make_app, host):
+    """sshd.service is the host's, and stays as written; db.service is the app's."""
+    app = make_app("hostunit")
+    app.write("quadlets/main.container",
+              "[Unit]\nWants=sshd.service db.service\nAfter=sshd.service db.service\n\n"
+              f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network:ip=198.51.100.10\n")
+    app.write("quadlets/db.container", f"[Container]\n{IMAGE}\n{IDLE}\n")
+    app.write("quadlets/app.network", "[Network]\nSubnet=198.51.100.0/24\n")
+
+    step = app.deploy("started")
+
+    assert not step.failed, step.msg
+    after = host.unit(app.service("main"), "After")["After"].split()
+    assert app.service("db") in after
+    assert "sshd.service" in after
+    assert host.active_state(app.service("db")) == "active"
+    networks = host.inspect(app.container("main"))["NetworkSettings"]["Networks"]
+    assert networks[f"{app.name}--app"]["IPAddress"] == "198.51.100.10"
+
+
+def test_file_with_windows_line_endings(make_app, host):
+    app = make_app("crlf")
+    content = (f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network\nVolume=data.volume:/data\n"
+               "Volume=%config%:/etc/app\n")
+    app.write_bytes("quadlets/main.container", content.replace("\n", "\r\n").encode())
+    app.write("quadlets/app.network", "[Network]\n")
+    app.write("quadlets/data.volume", "[Volume]\n")
+    app.write("config/main/app.conf", "a=1\n")
+
+    step = app.deploy("started")
+
+    assert not step.failed, step.msg
+    assert host.container_exec(app.container("main"), "cat /etc/app/app.conf").stdout == "a=1\n"
+    container = host.inspect(app.container("main"))
+    assert f"{app.name}--app" in container["NetworkSettings"]["Networks"]
+    mount = next(m for m in container["Mounts"] if m["Destination"] == "/data")
+    assert mount["Name"] == f"{app.name}--data"
+    assert "idmap" in host.container_exec(app.container("main"),
+                                          "grep ' /data ' /proc/self/mountinfo").stdout
+
+
+def test_comments_above_the_first_header_are_kept(make_app, host):
+    app = make_app("comments")
+    app.write("quadlets/main.container", f"# What the app is for\n\n# The main container\n"
+                                         f"[Container]\n{IMAGE}\n{IDLE}\nVolume=data.volume:/data\n")
+    app.write("quadlets/data.volume", "# Owned by root\n[Volume]\n")
+
+    step = app.deploy("started")
+
+    assert not step.failed, step.msg
+    main = host.read(app.quadlet_path("main.container"))
+    # The [Unit] section the module adds opens below the file's own leading comments
+    assert main.startswith("# What the app is for\n\n[Unit]\n")
+    assert "\n# The main container\n[Container]\n" in main
+    assert host.read(app.quadlet_path("data.volume")).startswith("# Owned by root\n[Volume]\n")
+    assert host.active_state(app.service("main")) == "active"
+
+
 def test_check_mode_is_skipped(make_app, host):
     app = make_app("check")
     app.write("quadlets/main.container", MAIN)

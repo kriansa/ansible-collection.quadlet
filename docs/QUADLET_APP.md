@@ -55,31 +55,44 @@ myapp/
 
 ## Preprocessing Rules
 
-The module automatically preprocesses quadlet files:
+The module automatically preprocesses quadlet files. It reads them the way systemd does: a
+directive can be written `Key=value` or `Key = value`.
 
 ### Resource Prefixing
-References to other resources and systemd units are automatically prefixed with the app name. This applies to: `Network`, `Pod`, `Volume`, `Wants`, `Requires`, `Requisite`, `BindsTo`, `PartOf`, `Upholds`, `Conflicts`, `Before`, and `After` directives.
+References to the app's own files and units are automatically prefixed with the app name. This
+applies to: `Network`, `Pod`, `Volume`, `Wants`, `Requires`, `Requisite`, `BindsTo`, `PartOf`,
+`Upholds`, `Conflicts`, `Before`, `After` and `Also` directives.
+
+A name counts as the app's when it is one of its files in `quadlets/` or `units/`, or the service
+podman generates from one of its quadlets (`db.service` from `db.container`, `app-network.service`
+from `app.network`). Anything else is left as written: a host unit such as `sshd.service`, or another
+app's resource spelled out in full, such as `Network=otherapp--main.network`. Each unit of a list is
+judged on its own.
 
 ```ini
 # Before preprocessing
 [Unit]
-After=db.service
+After=db.service sshd.service
 
 [Container]
 Network=app.network
-Volume=data.volume
+Volume=data.volume:/data
 
 # After preprocessing (app name: myapp)
 [Unit]
-After=myapp--db.service
+After=myapp--db.service sshd.service
 
 [Container]
 Network=myapp--app.network
-Volume=myapp--data.volume:rw,Z,idmap
+Volume=myapp--data.volume:/data:rw,Z,idmap
 ```
 
-*For named `.volume` references with no options specified, `rw,Z,idmap` is applied automatically —
-see [Volume Ownership](#volume-ownership).*
+*For named `.volume` references with a destination and no options, `rw,Z,idmap` is applied
+automatically — see [Volume Ownership](#volume-ownership).*
+
+Joining another app's network by its file name, rather than by its podman network name
+(`Network=otherapp--main`), also makes the container wait for that network to be created. The other
+app has to be deployed first.
 
 ### Path Replacement
 Volume paths using `%init%` or `%config%` placeholders are replaced with deployment paths.
@@ -102,7 +115,9 @@ the mount instead — so the tree Ansible writes is never chowned out from under
 
 ### User Namespaces
 
-Every `.container` gets `UserNS=auto:size=65536` unless it declares a `UserNS=` of its own.
+Every `.container` gets `UserNS=auto:size=65536` unless it declares a `UserNS=` of its own, or
+joins a pod with `Pod=`: a container in a pod shares the pod's user namespace, and podman refuses
+to start one that asks for another.
 
 Two things are happening here. First, **`auto` is the default**: rootful podman otherwise puts a
 container in the host's namespace, so its root *is* the host's root. Defaulting to `auto` gives each
@@ -180,13 +195,15 @@ Driver=stratis
 X-Owner=10000:10000
 ```
 
-`X-Owner` is consumed by this module and never reaches the deployed file.
+`X-Owner` is consumed by this module and never reaches the deployed file. In its place the volume
+gets `User=` and `Group=` with the same ids (unless it sets either itself), so podman creates it
+already owned that way - see [Empty volumes](#empty-volumes).
 
 > **Getting it wrong is an outage, not data loss.** If the declared owner is not the uid the app
 > actually runs as, the app cannot read its own volume and fails to start. Correct the value and
-> redeploy: the marker path changes, so the chown re-runs. The one case to think about first is a
-> volume whose files are *not* uniformly owned — flattening it to a single owner loses that
-> distinction, and no redeploy brings it back.
+> redeploy with `state: started`: the marker path changes, so the chown re-runs. The one case to
+> think about first is a volume whose files are *not* uniformly owned — flattening it to a single
+> owner loses that distinction, and no redeploy brings it back.
 
 ### Why it exists
 
@@ -212,8 +229,15 @@ that chowns the volume once, ordered before every container that mounts it.
 It is guarded by a marker under `/var/lib/quadlet-app/` whose filename carries the ids, e.g.
 `myapp--data.10000_10000.done`. Once written, `ConditionPathExists=!` skips the unit on every
 subsequent boot. Changing `X-Owner` changes the marker path, so the chown runs again — exactly once
-— and the module removes the volume's previous marker. Listing that directory therefore shows what
-each volume is currently owned by.
+— and the unit replaces the volume's previous marker with the new one. Listing that directory
+therefore shows what each volume is currently owned by.
+
+The unit runs when main first starts, since main depends on it, and on any deploy with `state:
+started` or `restarted` that finds the volume's marker missing: the volume is new, its `X-Owner`
+changed, or the marker was deleted by hand. `state: installed` never runs it. Running it restarts
+every container that mounts the volume, and `installed` leaves running containers alone, so an
+owner changed under `installed` is applied by the next `started` or `restarted` deploy, or on the
+next boot.
 
 The unit deliberately runs **without a user namespace**. A process inside one cannot chown a file
 whose owner is unmapped, not even as container root, so a namespaced helper could never migrate a
@@ -228,6 +252,20 @@ container-relative ids straight to disk, and is skipped thereafter.
   is not readable by the container until the bootstrap unit has run.
 - Failure signature when ownership is wrong: files show as `65534`, and writes fail with
   `Operation not permitted` even as root inside the container.
+
+### Empty volumes
+
+Podman's default (local) volume driver re-chowns an *empty* volume to the container's user every
+time a container starts. Left alone, that would undo `X-Owner` on a new volume - and the bootstrap
+unit, skipped by its marker, would never put it back. Creating the volume with `User=`/`Group=`
+stops this, which is why a declared owner is also written there.
+
+- **Only volumes created after this applies benefit:** podman never changes an existing volume's
+  options. An existing volume that is still empty can simply be removed; it is recreated, with
+  its owner, on the next start.
+- **With a volume driver**, quadlet hands `User=`/`Group=` to the driver as an `o=uid=…,gid=…`
+  option. Podman never chowns a driver's volumes, so the driver does not need it; a driver that
+  rejects unknown options would refuse to create the volume.
 
 ## Timers
 
@@ -360,11 +398,12 @@ journalctl -u myapp--backup.service         # what happened when it did
 | `state` | No | `installed` | Deployment state: `installed`, `started`, `restarted` |
 | `force` | No | `false` | Force redeployment even if files haven't changed |
 | `systemctl_timeout` | No | `120` | Timeout in seconds for systemctl commands (start, stop, restart, daemon-reload) |
+| `settle_time` | No | `5` | Seconds the services a run started must stay up before the task succeeds; `0` turns the check off. See [Startup check](#startup-check) |
 
 ### States
 
-- **installed**: Deploy files and reload systemd, but don't manage service state
-- **started**: Deploy files and ensure the main service is running. If files changed and the service is already running, restarts all app-prefixed dependencies and the main service
+- **installed**: Deploy files and reload systemd, but don't manage service state. Nothing running is restarted, including the [volume ownership bootstrap](#what-gets-generated)
+- **started**: Deploy files and ensure the main service is running. If files changed, restarts all app-prefixed dependencies and the main service, which starts any that are not running
 - **restarted**: Deploy files and restart all app-prefixed dependencies and the main service
 
 These describe the main service only. Timers are enabled and started under every state — see
@@ -391,6 +430,10 @@ Task-level variables are supported:
     app_version: "2.0"
     api_key: "{{ vault_api_key }}"
 ```
+
+Files must be UTF-8 text; any other file fails the task before anything is deployed. A file that
+is nothing but one expression, such as `{{ port }}`, is written the way Ansible's `template` module
+writes it: as the value's text, without a trailing newline, and empty when the value is null.
 
 ### Application Name Variable
 
@@ -599,6 +642,13 @@ Persistent=true
 `quadlet_app_name` spelled out. See
 [Application Name Variable](#application-name-variable).
 
+## Validation
+
+Before writing anything, the module runs podman's quadlet generator over a staged copy of the
+app's quadlets - the same generator systemd runs at boot. A file it rejects fails the deploy with
+the generator's message, and nothing reaches the host. Only this app's files are checked: a broken
+quadlet left on the host by something else cannot fail this deploy.
+
 ## Idempotency
 
 The module uses SHA256 checksums to detect file changes. Deployment only occurs when:
@@ -619,11 +669,10 @@ Units from `units/` keep their own suffix: `backup.timer` becomes `myapp--backup
 
 ### Dependency Handling
 
-When using `state=restarted`, or `state=started` with file changes while the main service is running,
-the module:
+When using `state=restarted`, or `state=started` with file changes, the module:
 1. Discovers all app-prefixed service dependencies of the main service — everything it `Requires=`
    or `Wants=`, directly or not
-2. Restarts them, the main service, and any volume bootstrap unit whose `X-Owner` changed, in a
+2. Restarts them, the main service, and any volume bootstrap unit still to apply its `X-Owner`, in a
    single `systemctl restart`
 
 One call means one systemd transaction, so every unit stops and starts exactly once, in dependency
@@ -631,13 +680,26 @@ order, with a bootstrap unit finishing before the containers that mount its volu
 ensures that when you update your application, all related services (databases, caches, workers,
 etc.) are restarted in the correct order.
 
-Whether the main service "is running" is read once, before the module restarts anything. Asking
-later is unreliable: restarting a volume's bootstrap unit makes systemd restart every container that
-requires it, main included, so a later check can find main mid-restart — `activating`, and longest
-for a unit that waits on a healthcheck (`Notify=healthy`). The module would then only start main
-instead of restarting the app, and a changed secondary container that main merely `Wants=` would
-keep running its old image. For the same reason, bootstrap units whose `X-Owner` did not change are
-never restarted.
+This happens whether or not the main service is running. A unit that is not running is simply
+started, and a secondary container still running while main is stopped gets its new definition too.
+Bootstrap units whose `X-Owner` is already applied are never restarted.
+
+### Startup check
+
+Podman reports a container as started as soon as the container starts, so `systemctl start`
+succeeds even when its process dies a moment later. After starting or restarting anything, the
+module therefore waits `settle_time` seconds (5 by default) and fails the task if a service it
+started is no longer running, or if systemd has had to start it again in the meantime, as with a
+container in a crash loop. The error carries the service's last log lines.
+
+Only the services this run started are watched, whether it started them itself or systemd pulled
+them in. Services that run once and finish (`Type=oneshot`) are not: `systemctl` already waits for
+them and reports their failure. Nothing is waited for when a run starts nothing, or under `state:
+installed`.
+
+A container that takes longer than that to fail is not caught. For a stronger guarantee, give it a
+health check and `Notify=healthy`: podman then reports it started only once it is healthy, and
+`systemctl` fails when it never gets there.
 
 Manage services manually:
 ```bash
@@ -681,7 +743,8 @@ systemctl status myapp--data-volume-init.service   # skipped, or failed?
 ls /var/lib/quadlet-app/                           # which ownership was last applied
 ```
 
-Deleting the volume's marker and restarting the unit re-runs the chown.
+Deleting the volume's marker and restarting the unit re-runs the chown. So does the next deploy with
+`state: started` or `restarted`, once the marker is gone.
 
 ### `mount point /mnt/<volume> exists and is not empty`
 

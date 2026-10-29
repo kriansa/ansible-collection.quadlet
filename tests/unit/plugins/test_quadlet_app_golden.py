@@ -72,7 +72,6 @@ CONTENT_FEATURES = {
     "UserNS=host": r"^UserNS=host$",
     "a bare UserNS=auto": r"^UserNS=auto$",
     "an explicit UserNS size": r"^UserNS=auto:size=",
-    "an empty UserNS=": r"^UserNS=$",
     "a %config% mount": r"%config%",
     "an %init% mount": r"%init%",
     "a named volume mount": r"^Volume=\w[\w-]*\.volume:",

@@ -16,6 +16,10 @@ def container(extra: str = "") -> str:
     return f"[Container]\n{IMAGE}\n{IDLE}\n{extra}"
 
 
+def markers(host, app):
+    return [name for name in host.listdir(STATE_DIR) if name.startswith(f"{app.name}--")]
+
+
 def volume_app(make_app, host, tag, *, owner=None, user=None, seed=True):
     """main mounting data.volume at /data, optionally running as `user`."""
     app = make_app(tag)
@@ -84,10 +88,8 @@ class TestOwnership:
         assert f"{app.name}--data.5_5.done" in host.listdir(STATE_DIR)
 
     @pytest.mark.parametrize("value, message", [
-        # Pinned: the file name is hidden by no_log, because it is one of the strings of the
-        # _files_data parameter - so the message cannot say which file is wrong
-        ("abc", "Invalid X-Owner in ********: 'abc'."),
-        ("70000:0", "X-Owner in ******** is out of range: '70000:0'."),
+        ("abc", "Invalid X-Owner in data.volume: 'abc'."),
+        ("70000:0", "X-Owner in data.volume is out of range: '70000:0'."),
     ])
     def test_invalid_owner_deploys_nothing(self, make_app, host, value, message):
         app = volume_app(make_app, host, "badowner", owner=value, seed=False)[0]
@@ -98,19 +100,19 @@ class TestOwnership:
         assert step.msg.startswith(message)
         assert not host.exists(app.quadlet_path("main.container"))
 
-    def test_empty_volume_is_reset_by_podman(self, make_app, host):
+    def test_empty_volume_keeps_its_owner(self, make_app, host):
         """
-        Pinned: with podman's local driver, an *empty* volume's root is chowned to the container's
-        user every time a container starts - undoing X-Owner, while the marker keeps the bootstrap
-        from ever running again. Volumes managed by a volume driver (stratis, for instance) are
-        never chowned by podman, so they are not affected.
+        Podman's local driver re-chowns an empty volume to the container's user on every start,
+        unless the volume was created with an owner of its own - which the declared owner gives it.
         """
         app = volume_app(make_app, host, "emptyvol", owner="1000:1000", seed=False)[0]
         app.deploy("started")
 
         mountpoint = host.volume_mountpoint(f"{app.name}--data")
-        assert host.stat(mountpoint).owner == "0:0"
-        assert f"{app.name}--data.1000_1000.done" in host.listdir(STATE_DIR)
+        assert host.stat(mountpoint).owner == "1000:1000"
+        host.run(f"systemctl restart {app.service('main')}")
+        assert host.stat(mountpoint).owner == "1000:1000"
+        assert host.listdir(mountpoint) == []
 
     def test_explicit_mount_options_bypass_idmap(self, make_app, host):
         """
@@ -128,6 +130,41 @@ class TestOwnership:
 
         assert written.returncode != 0
         assert "Permission denied" in written.stderr
+
+    def test_installed_runs_no_bootstrap(self, make_app, host):
+        """The bootstrap runs once main is started by anyone - here by hand, as a boot would."""
+        app, mountpoint = volume_app(make_app, host, "instfresh", owner="5:5")
+
+        app.deploy("installed")
+
+        assert markers(host, app) == []
+        assert host.stat(f"{mountpoint}/seed").owner == "0:0"
+        host.run(f"systemctl start {app.service('main')}")
+        assert markers(host, app) == [f"{app.name}--data.5_5.done"]
+        assert host.stat(f"{mountpoint}/seed").owner == "5:5"
+
+    def test_owner_change_under_installed_waits_for_the_next_start(self, make_app, host):
+        """Re-running the bootstrap restarts containers mounting the volume; installed must not."""
+        app, mountpoint = volume_app(make_app, host, "instowner", owner="1:1")
+        app.deploy("started")
+        main_id = host.invocation_id(app.service("main"))
+
+        app.write("quadlets/data.volume", "[Volume]\nX-Owner=2:2\n")
+        installed = app.deploy("installed")
+
+        assert installed.changed
+        assert host.invocation_id(app.service("main")) == main_id
+        assert host.stat(f"{mountpoint}/seed").owner == "1:1"
+        assert markers(host, app) == [f"{app.name}--data.1_1.done"]
+
+        started = app.deploy("started")
+
+        assert started.changed
+        assert started.starts(app.service("data-volume-init")) == 1
+        assert started.starts(app.service("main")) == 1
+        assert host.stat(f"{mountpoint}/seed").owner == "2:2"
+        assert markers(host, app) == [f"{app.name}--data.2_2.done"]
+        assert not app.deploy("started").changed
 
     def test_removed_volume_is_left_behind(self, make_app, host):
         """Pinned: nothing is ever removed from the host."""
@@ -189,7 +226,8 @@ class TestMarkers:
     def test_owner_change_replaces_only_that_volumes_marker(self, make_app, host):
         app = volume_app(make_app, host, "markers", owner="1:1")[0]
         app.deploy("started")
-        others = [f"{app.name}--data2.9_9.done", "qaother--data.1_1.done"]
+        others = [f"{app.name}--data2.9_9.done", f"{app.name}--data.v2.9_9.done",
+                  "qaother--data.1_1.done"]
         host.run(" && ".join(f"touch {STATE_DIR}/{name}" for name in others))
 
         app.write("quadlets/data.volume", "[Volume]\nX-Owner=2:2\n")
@@ -201,26 +239,21 @@ class TestMarkers:
         assert all(name in markers for name in others)
         host.run(" && ".join(f"rm {STATE_DIR}/{name}" for name in others))
 
-    def test_stale_marker_survives_until_files_change(self, make_app, host):
-        """Pinned: markers are only cleaned up as part of writing files."""
+    def test_previous_markers_go_when_the_bootstrap_next_runs(self, make_app, host):
+        """Only the bootstrap unit removes markers - a deploy, even with force, leaves them be."""
         app = volume_app(make_app, host, "stale", owner="1:1")[0]
         app.deploy("started")
         stale = f"{STATE_DIR}/{app.name}--data.5_5.done"
         host.run(f"touch {stale}")
 
-        app.deploy("started")
-        assert host.exists(stale)
-
         app.write("quadlets/main.container", container("Volume=data.volume:/data\nEnvironment=X=1\n"))
         app.deploy("started")
-        assert not host.exists(stale)
-
-    def test_force_cleans_stale_markers(self, make_app, host):
-        app = volume_app(make_app, host, "forcestale", owner="1:1")[0]
-        app.deploy("started")
-        stale = f"{STATE_DIR}/{app.name}--data.5_5.done"
-        host.run(f"touch {stale}")
-
         app.deploy("started", args={"force": True})
+        assert host.exists(stale)
 
-        assert not host.exists(stale)
+        host.run(f"rm {STATE_DIR}/{app.name}--data.1_1.done")
+        step = app.deploy("started")
+
+        assert step.changed
+        assert step.starts(app.service("data-volume-init")) == 1
+        assert markers(host, app) == [f"{app.name}--data.1_1.done"]

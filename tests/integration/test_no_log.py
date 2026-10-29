@@ -33,15 +33,12 @@ def test_rendered_files_never_reach_the_journal(make_app, host):
     journal = host.journal(step.since)
     # Positive control: the invocation was logged, so its absence below means something
     assert "Invoked with" in journal
-    assert "_files_data=NOT_LOGGING_PARAMETER" in journal
+    assert "_contents=NOT_LOGGING_PARAMETER" in journal
     assert value not in journal
-    # In the result, every string inside the parameter is replaced, keeping its structure
-    files_data = step.result.result["invocation"]["module_args"]["_files_data"]
-    assert files_data["config"] == [{
-        "container": "VALUE_SPECIFIED_IN_NO_LOG_PARAMETER",
-        "path": "VALUE_SPECIFIED_IN_NO_LOG_PARAMETER",
-        "content": "VALUE_SPECIFIED_IN_NO_LOG_PARAMETER",
-    }]
+    # In the result, the contents are hidden and the names are not
+    module_args = step.result.result["invocation"]["module_args"]
+    assert module_args["_contents"] == ["VALUE_SPECIFIED_IN_NO_LOG_PARAMETER"] * 2
+    assert {"kind": "config", "container": "main", "path": "secret.env"} in module_args["_files"]
     assert value not in step.run.output
 
 
@@ -70,11 +67,10 @@ def test_failed_deploy_does_not_leak(make_app, host):
     assert value not in host.journal(step.since)
 
 
-def test_masking_mangles_result_fields(make_app, host):
+def test_file_names_are_readable_in_the_result(make_app, host):
     """
-    Pinned bug: no_log hides every string inside _files_data wherever it appears in the result.
-    "main.container" is a file name in every app, so quadlet_files is always mangled; "main" is
-    a directory name whenever config/main/ exists, and then the service name is mangled too.
+    no_log masks every string of the parameter it protects, wherever it appears. File names are
+    kept out of it, so "main.container" and "main" (a config directory) still read as written.
     """
     app = make_app("masking")
     app.write("quadlets/main.container", main())
@@ -82,8 +78,8 @@ def test_masking_mangles_result_fields(make_app, host):
 
     result = app.deploy("installed").result.result
 
-    assert result["quadlet_files"] == [f"{app.name}--********"]
-    assert result["service_name"] == f"{app.name}--********.service"
+    assert result["quadlet_files"] == [f"{app.name}--main.container"]
+    assert result["service_name"] == f"{app.name}--main.service"
 
 
 def test_service_name_is_readable_without_a_main_config_directory(make_app, host):

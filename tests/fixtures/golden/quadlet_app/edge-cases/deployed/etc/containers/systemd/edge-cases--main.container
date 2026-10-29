@@ -1,10 +1,13 @@
+# Unusual but valid input, kept here so the goldens show exactly what the module does with it.
+# This comment sits above the first section header, and stays there.
 [Unit]
 Description=Edge cases
-# Only the first unit of a multi-unit value gets the app prefix
-After=edge-cases--db.service cache.service
+# Each unit of a list gets the app prefix if the app defines it: db.service and the service
+# podman generates from main.network do, cache.service does not
+After=edge-cases--db.service edge-cases--main-network.service cache.service
 After=network-online.target
-# A host unit, prefixed all the same
-Wants=edge-cases--sshd.service
+# A host unit, left as written
+Wants=sshd.service
 # Written with a trailing slash, so the storage dependency is added a second time
 RequiresMountsFor=/var/lib/containers/storage/
 RequiresMountsFor=/var/lib/containers/storage

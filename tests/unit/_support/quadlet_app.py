@@ -21,9 +21,44 @@ from ansible_collections.kriansa.commons.tests.unit._support.fakes import (
 
 FILE_KINDS = ("quadlets", "units", "init", "config")
 
+# How each group of files is labelled in the module's `_files` argument
+KIND_OF_GROUP = {"quadlets": "quadlet", "units": "unit", "init": "init", "config": "config"}
+
+
+def to_module_args(files_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Turn a set of app files into the module's arguments.
+
+    Names travel in `_files`, which is logged; contents in `_contents`, which is no_log and is
+    matched to `_files` by position.
+
+    Args:
+        files_data: Files grouped as quadlets, units, init and config (see make_files_data)
+    """
+    if files_data is None:
+        return {"_files": None, "_contents": None}
+    files, contents = [], []
+    for group in FILE_KINDS:
+        for entry in files_data.get(group, []):
+            files.append({"kind": KIND_OF_GROUP[group],
+                          **{key: value for key, value in entry.items() if key != "content"}})
+            contents.append(entry["content"])
+    return {"_files": files, "_contents": contents}
+
+
+def from_module_args(args: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """The inverse of to_module_args: the files a module call carries, grouped again."""
+    group_of = {kind: group for group, kind in KIND_OF_GROUP.items()}
+    files_data: Dict[str, List[Dict[str, Any]]] = {group: [] for group in FILE_KINDS}
+    for entry, content in zip(args["_files"], args["_contents"]):
+        files_data[group_of[entry["kind"]]].append(
+            {**{key: value for key, value in entry.items() if key != "kind"}, "content": content}
+        )
+    return files_data
+
 
 def files_data_to_tree(files_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, str]:
-    """Flatten `_files_data` into relative path -> content."""
+    """Flatten app files, grouped as make_files_data groups them, into relative path -> content."""
     tree = {}
     for kind in ("quadlets", "units"):
         for entry in files_data.get(kind, []):
@@ -120,8 +155,14 @@ class Outcome:
 
 def run_module(files_data: Optional[Dict[str, Any]], *, src: str = "/apps/app",
                state: str = "installed", force: bool = False, systemctl_timeout: int = 120,
-               name: Optional[str] = None, control_node_processed: bool = True) -> Outcome:
-    """Run the real module with these parameters and report how it ended."""
+               settle_time: int = 0, name: Optional[str] = None,
+               control_node_processed: bool = True) -> Outcome:
+    """
+    Run the real module with these parameters and report how it ended.
+
+    The settle check is off unless asked for: it has tests of its own, and every other test would
+    otherwise have its queries in the way.
+    """
     fake = FakeModule(
         {
             "src": src,
@@ -129,8 +170,9 @@ def run_module(files_data: Optional[Dict[str, Any]], *, src: str = "/apps/app",
             "state": state,
             "force": force,
             "systemctl_timeout": systemctl_timeout,
+            "settle_time": settle_time,
             "_control_node_processed": control_node_processed,
-            "_files_data": files_data,
+            **to_module_args(files_data),
         }
     )
     try:
@@ -154,7 +196,14 @@ def deploy_fresh(monkeypatch, files_data: Dict[str, Any], app_name: str, *,
     deployment = Deployment(systemd=systemd)
 
     monkeypatch.setattr(module, "subprocess", systemd.as_subprocess_module())
+    monkeypatch.setattr(module, "time", systemd.as_time_module())
     monkeypatch.setattr(module.QuadletIdempotency, "file_changed", lambda self, path, content: True)
+    # Nor any ownership marker, so every bootstrap unit is still to run
+    monkeypatch.setattr(
+        module.QuadletAppModule,
+        "_pending_volume_inits",
+        lambda self: [f"{self.app_name}--{stem}-volume-init.service" for stem in self.volume_owners],
+    )
     monkeypatch.setattr(
         module.QuadletAppModule,
         "_deploy_files",
@@ -168,8 +217,9 @@ def deploy_fresh(monkeypatch, files_data: Dict[str, Any], app_name: str, *,
             "state": "started",
             "force": False,
             "systemctl_timeout": 120,
+            "settle_time": 5,
             "_control_node_processed": True,
-            "_files_data": files_data,
+            **to_module_args(files_data),
             **params,
         }
     )

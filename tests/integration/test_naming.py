@@ -51,11 +51,11 @@ def test_directory_name_is_lowercased(make_app, host):
 
 
 def test_trailing_slash_without_name(make_app, host):
-    """Pinned: the module takes the basename of "apps/x/", which is empty."""
     app = make_app("slash")
-    app.write("quadlets/main.container", MAIN)
+    app.write("quadlets/main.container", MAIN + "Environment=APP={{ quadlet_app_name }}\n")
 
     step = app.deploy("installed", src=f"apps/{app.name}/")
 
-    assert step.failed
-    assert step.msg.startswith("Invalid application name: .")
+    assert not step.failed, step.msg
+    assert step.result.result["application_name"] == app.name
+    assert f"Environment=APP={app.name}\n" in host.read(app.quadlet_path("main.container"))

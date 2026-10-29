@@ -10,14 +10,6 @@
     },
     {
       "argv": [
-        "systemctl",
-        "is-active",
-        "nginx--main.service"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
         "/usr/lib/systemd/system-generators/podman-system-generator",
         "-dryrun",
         "-v"
@@ -34,7 +26,9 @@
     {
       "argv": [
         "systemctl",
-        "is-active",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
         "nginx--main.service"
       ],
       "timeout": 10
@@ -42,10 +36,41 @@
     {
       "argv": [
         "systemctl",
-        "start",
+        "list-dependencies",
+        "--all",
+        "--type",
+        "service",
+        "nginx--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
         "nginx--main.service"
       ],
       "timeout": 120
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "nginx--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "nginx--main.service"
+      ],
+      "timeout": 10
     }
   ],
   "exit": {

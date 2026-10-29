@@ -151,10 +151,8 @@ class Host:
         """
         Create a volume holding one file, ahead of the deploy that would create it empty.
 
-        Podman's local driver re-chowns the root of an *empty* volume to the container's user
-        every time a container starts, which undoes X-Owner. Volumes managed by a volume driver
-        are never chowned by podman, so tests that check ownership the way such a host sees it
-        start from a volume that is not empty.
+        Seeding stands in for a volume that already holds data, and lets a test plant files with
+        specific ownership before the bootstrap unit runs.
 
         Returns:
             The volume's mount point on the host

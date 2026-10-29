@@ -1,3 +1,5 @@
+# No [Install] section: this container runs when the timer says so, not at boot.
+# No RemainAfterExit either, or only the first trigger would do anything.
 [Unit]
 Requires=postgres--main.service
 After=postgres--main.service

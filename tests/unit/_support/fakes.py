@@ -9,6 +9,9 @@ for real.
 
 from __future__ import annotations
 
+import os
+import re
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -53,6 +56,9 @@ class Call:
 
     argv: List[str]
     timeout: Optional[float]
+    # For a generator run: the directories it was pointed at, and the files in them at that moment
+    unit_dirs: Optional[str] = None
+    staged: Optional[Dict[str, str]] = None
 
     @property
     def systemctl(self) -> Optional[List[str]]:
@@ -81,16 +87,45 @@ class FakeSystemd:
     # Unit -> the answers its next `is-active` queries get, in order, before falling back to
     # `active`. Models a unit changing state on its own between two queries.
     scripted_states: Dict[str, List[str]] = field(default_factory=dict)
+    # Where the module wrote its quadlets. When set, starting an ownership bootstrap unit does what
+    # it would on a host - see run_bootstrap_unit
+    quadlet_dir: Optional[str] = None
+    # Unit -> its Type= as `systemctl show` reports it; "notify", as for a container, unless listed
+    types: Dict[str, str] = field(default_factory=dict)
+    # Units whose container exits right after it starts, leaving the unit failed
+    exits_after_start: set = field(default_factory=set)
+    # Units whose container keeps exiting and being started again by systemd: every pause of the
+    # module finds them on a new run
+    crash_loops: set = field(default_factory=set)
+    # Unit -> what `journalctl` prints for it
+    journal: Dict[str, str] = field(default_factory=dict)
+    # Unit -> how many times it has been started, which stands in for its InvocationID
+    invocations: Dict[str, int] = field(default_factory=dict)
+    failed: set = field(default_factory=set)
+    # The pauses the module took, in seconds
+    sleeps: List[float] = field(default_factory=list)
     calls: List[Call] = field(default_factory=list)
 
-    def run(self, argv, capture_output=False, text=False, check=False, timeout=None):
+    def run(self, argv, capture_output=False, text=False, check=False, timeout=None, env=None):
         del capture_output, text, check
         argv = list(argv)
-        self.calls.append(Call(argv, timeout))
+        call = Call(argv, timeout)
+        self.calls.append(call)
 
         if argv[0] == GENERATOR:
+            call.unit_dirs = (env or {}).get("QUADLET_UNIT_DIRS")
+            call.staged = {}
+            for directory in (call.unit_dirs or "").split(":"):
+                if directory and os.path.isdir(directory):
+                    for name in sorted(os.listdir(directory)):
+                        with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                            call.staged[name] = handle.read()
             returncode, stdout, stderr = self.generator_result
             return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+        if argv[0] == "journalctl":
+            unit = argv[argv.index("--unit") + 1]
+            return subprocess.CompletedProcess(argv, 0, self.journal.get(unit, ""), "")
 
         if argv[0] != "systemctl":
             raise AssertionError(f"unexpected process: {argv}")
@@ -112,6 +147,9 @@ class FakeSystemd:
             main = args[-1]
             lines = [main] + [f"  {dep}" for dep in self.dependencies.get(main, [])]
             return subprocess.CompletedProcess(argv, 0, "\n".join(lines) + "\n", "")
+        if verb == "show":
+            blocks = [self._show(unit) for unit in args[3:]]
+            return subprocess.CompletedProcess(argv, 0, "\n\n".join(blocks) + "\n", "")
 
         for prefix, (returncode, stderr) in self.failures.items():
             if tuple(args[: len(prefix)]) == prefix:
@@ -119,11 +157,52 @@ class FakeSystemd:
 
         if verb in ("start", "restart"):
             self.active.update(args[1:])
+            for unit in args[1:]:
+                self.invocations[unit] = self.invocations.get(unit, 0) + 1
+                self.failed.discard(unit)
+                if unit in self.exits_after_start:
+                    self.active.discard(unit)
+                    self.failed.add(unit)
+                self._run_if_bootstrap(unit)
         elif verb == "enable":
             self.enabled.update(args[1:])
         if self.on_command is not None:
             self.on_command(self, args)
         return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def _show(self, unit: str) -> str:
+        """`systemctl show` for one unit, with the properties the module asks for."""
+        if unit in self.active:
+            state, substate = "active", "running"
+        elif unit in self.failed:
+            state, substate = "failed", "failed"
+        else:
+            state, substate = "inactive", "dead"
+        count = self.invocations.get(unit, 0)
+        return "\n".join([
+            f"Id={unit}",
+            f"Type={self.types.get(unit, 'notify')}",
+            f"ActiveState={state}",
+            f"SubState={substate}",
+            f"InvocationID={f'invocation-{count}' if count else ''}",
+        ])
+
+    def _sleep(self, seconds: float):
+        self.sleeps.append(seconds)
+        for unit in self.crash_loops:
+            self.invocations[unit] = self.invocations.get(unit, 0) + 1
+
+    def as_time_module(self) -> SimpleNamespace:
+        """A drop-in for the `time` name inside the module under test: pausing takes no time."""
+        return SimpleNamespace(sleep=self._sleep)
+
+    def _run_if_bootstrap(self, unit: str):
+        if self.quadlet_dir is None or not unit.endswith("-volume-init.service"):
+            return
+        path = os.path.join(self.quadlet_dir, unit.removesuffix(".service") + ".container")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                run_bootstrap_unit(handle.read())
 
     def as_subprocess_module(self) -> SimpleNamespace:
         """A drop-in for the `subprocess` name inside the module under test."""
@@ -134,10 +213,19 @@ class FakeSystemd:
         )
 
     @property
+    def generator_calls(self) -> List[Call]:
+        return [call for call in self.calls if call.argv[0] == GENERATOR]
+
+    @property
     def log(self) -> List[str]:
-        """Every call as one readable line: systemctl arguments, or "generator" for a dry run."""
+        """
+        Every call as one readable line: systemctl's arguments, "generator" for a dry run, or the
+        whole command for anything else.
+        """
         return [
-            " ".join(call.systemctl) if call.systemctl is not None else "generator"
+            " ".join(call.systemctl) if call.systemctl is not None
+            else "generator" if call.argv[0] == GENERATOR
+            else " ".join(call.argv)
             for call in self.calls
         ]
 
@@ -149,8 +237,50 @@ class FakeSystemd:
     @property
     def state_changes(self) -> List[List[str]]:
         """systemctl calls that change something, leaving out the read-only queries."""
-        queries = ("is-active", "is-enabled", "list-dependencies")
+        queries = ("is-active", "is-enabled", "list-dependencies", "show")
         return [args for args in self.systemctl_calls if args[0] not in queries]
+
+
+def run_bootstrap_unit(text: str) -> bool:
+    """
+    Do on this machine what systemd does on a host when an ownership bootstrap unit starts.
+
+    The unit is skipped when the marker its condition names already exists. Otherwise its
+    ExecStartPost= commands run - the chown before them happens inside a container, and is left
+    out. Only the commands the module writes there are understood; anything else is an error, so a
+    change to the unit cannot slip past the tests unmodelled.
+
+    Args:
+        text: The unit file
+
+    Returns:
+        Whether the unit ran
+    """
+    lines = text.splitlines()
+    condition = "ConditionPathExists=!"
+    marker = next(line.removeprefix(condition) for line in lines if line.startswith(condition))
+    if os.path.exists(marker):
+        return False
+
+    for line in lines:
+        if not line.startswith("ExecStartPost="):
+            continue
+        argv = shlex.split(line.split("=", 1)[1])
+        if argv[:2] == ["/usr/bin/mkdir", "-p"] and len(argv) == 3:
+            os.makedirs(argv[2], exist_ok=True)
+        elif (argv[0] == "/usr/bin/find" and argv[2:5] == ["-maxdepth", "1", "-regex"]
+              and argv[6:] == ["-delete"]):
+            # find matches its -regex against the whole path it prints, directory included
+            for entry in os.listdir(argv[1]):
+                path = os.path.join(argv[1], entry)
+                if re.fullmatch(argv[5], path):
+                    os.unlink(path)
+        elif argv[0] == "/usr/bin/touch" and len(argv) == 2:
+            with open(argv[1], "a", encoding="utf-8"):
+                pass
+        else:
+            raise AssertionError(f"a bootstrap unit runs a command the fake does not know: {argv}")
+    return True
 
 
 def raiser(exc: BaseException) -> Callable[..., Any]:

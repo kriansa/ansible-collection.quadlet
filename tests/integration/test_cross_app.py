@@ -45,16 +45,18 @@ def test_joining_before_the_network_exists(make_app, host):
     assert host.active_state(web.service("main")) != "active"
 
 
-def test_network_named_as_a_quadlet_is_prefixed_with_the_wrong_app(make_app, host):
-    """Pinned: "<other>--main.network" is read as a network of this app and prefixed again."""
+def test_joining_by_the_other_apps_quadlet_name(make_app, host):
+    """"<other>--main.network" is not a file of this app, so it is left as written."""
     owner = network_owner(make_app)
     owner.deploy("started")
     web = joiner(make_app, owner, network_line=f"Network={owner.name}--main.network")
 
     step = web.deploy("started")
 
-    assert f"Network={web.name}--{owner.name}--main.network" in host.read(web.quadlet_path("main.container"))
-    assert step.failed
+    assert not step.failed, step.msg
+    assert f"Network={owner.name}--main.network\n" in host.read(web.quadlet_path("main.container"))
+    networks = host.inspect(web.container("main"))["NetworkSettings"]["Networks"]
+    assert f"{owner.name}--main" in networks
 
 
 def test_restarting_the_owner_leaves_the_joiner_alone(make_app, host):

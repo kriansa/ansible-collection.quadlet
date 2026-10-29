@@ -40,29 +40,14 @@ def test_pod_file_is_named_and_prefixed(make_app, host):
     assert host.unit_exists(f"{app.name}--backend-pod.service")
 
 
-def test_container_in_a_pod_with_the_default_user_namespace(make_app, host):
-    """Characterises the injected UserNS=auto on a container that joins a pod."""
+def test_container_in_a_pod_runs(make_app, host):
+    """A container joining a pod uses the pod's user namespace, so it gets no default of its own."""
     app = pod_app(make_app, "podns")
 
     step = app.deploy("started")
 
-    assert "UserNS=auto:size=65536" in host.read(app.quadlet_path("main.container"))
-    # Pinned: podman refuses a user namespace on a container that joins a pod
-    assert step.failed
-    assert host.active_state(app.service("main")) != "active"
-
-
-def test_container_in_a_pod_with_its_user_namespace_left_to_the_pod(make_app, host):
-    """
-    An explicit empty UserNS= stops the default from being injected, which is the way to put a
-    container in a pod today.
-    """
-    app = pod_app(make_app, "podnsempty", container_extra="UserNS=\n")
-
-    step = app.deploy("started")
-
     assert not step.failed, step.msg
-    assert "UserNS=auto" not in host.read(app.quadlet_path("main.container"))
+    assert "UserNS" not in host.read(app.quadlet_path("main.container"))
     assert host.active_state(app.service("main")) == "active"
     assert host.active_state(f"{app.name}--backend-pod.service") == "active"
     # A pod's volumes are mounted into every container that joins it

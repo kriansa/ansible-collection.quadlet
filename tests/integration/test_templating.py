@@ -124,30 +124,31 @@ def test_vault_encrypted_file(make_app, host, tmp_path):
 
 
 def test_non_utf8_file(make_app, host):
-    """Pinned: accepted on the controller with an escape warning, then rejected by the module."""
+    """Rejected on the controller, before anything reaches the host."""
     app = make_app("binary")
     app.write("quadlets/main.container", main())
     app.write_bytes("config/main/out", b"a\xffb\n")
 
     step = app.deploy("installed")
 
-    assert "could not be decoded as 'utf-8'" in step.run.output
     assert step.failed
-    assert step.msg.startswith("Unexpected error: 'utf-8' codec can't encode character '\\udcff'"), step.msg
-    # Pinned: the file was opened for writing before the write failed, so it is left empty
-    assert host.read(f"/srv/{app.name}/config/main/out") == ""
+    assert step.msg.startswith("Failed to process files on control node: File "), step.msg
+    assert step.msg.endswith("/config/main/out is not valid UTF-8: 'utf-8' codec can't decode "
+                             "byte 0xff in position 1: invalid start byte"), step.msg
+    assert not host.exists(app.quadlet_path("main.container"))
+    assert not host.exists(f"/srv/{app.name}")
 
 
 def test_bare_expression_file(make_app, host):
-    """Pinned: a file that is only `{{ value }}` renders to a number, which the module cannot write."""
+    """A file that is only `{{ value }}` is written as that value's text, as the template module does."""
     app = make_app("bare")
     app.write("quadlets/main.container", main())
     app.write("config/main/out", "{{ 42 }}")
 
     step = app.deploy("installed")
 
-    assert step.failed
-    assert step.msg == "Unexpected error: write() argument must be str, not int"
+    assert not step.failed, step.msg
+    assert host.read(f"/srv/{app.name}/config/main/out") == "42"
 
 
 def test_backslashes_and_crlf_survive_byte_for_byte(make_app, host):

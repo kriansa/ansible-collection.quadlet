@@ -35,8 +35,7 @@ def test_enabled_and_started_even_when_only_installed(make_app, host):
 
     step = app.deploy("installed")
 
-    # Pinned: "job.timer" is one of the strings of the no_log _files_data, so it is masked
-    assert step.result.result["unit_files"] == [f"{app.name}--********"]
+    assert step.result.result["unit_files"] == [timer_unit(app)]
     state = timer_state(host, app)
     assert (state["ActiveState"], state["UnitFileState"]) == ("active", "enabled")
     assert host.read(f"/etc/systemd/system/{timer_unit(app)}") == (
@@ -177,8 +176,7 @@ def test_timer_without_timer_section(make_app, host):
     step = app.deploy("installed")
 
     assert step.failed
-    # The unit name is masked by no_log, see test_enabled_and_started_even_when_only_installed
-    assert step.msg.startswith(f"systemctl restart {app.name}--******** failed:")
+    assert step.msg.startswith(f"systemctl restart {timer_unit(app)} failed:")
     assert "has a bad unit file setting" in step.msg
     assert host.exists(f"/etc/systemd/system/{timer_unit(app)}")
 

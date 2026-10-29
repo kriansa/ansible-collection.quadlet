@@ -5,6 +5,8 @@ Files go to a temporary host directory (fake_host) and systemd is faked (systemd
 run sees what the first one wrote, the way it would on a real host.
 """
 
+import os
+
 import pytest
 
 from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
@@ -62,12 +64,10 @@ class TestFreshHost:
             "unit_files": [],
             "msg": "quadlet files deployed",
         }
+        # No bootstrap: it runs when main is first started, and systemd does that on its own
         assert systemd.log == [
-            f"is-active {MAIN_SVC}",
             "generator",
             "daemon-reload",
-            # Pinned: the ownership bootstrap runs even though nothing is to be started
-            f"restart {INIT_SVC}",
         ]
         assert sorted(fake_host.files()) == [
             "etc/containers/systemd/app--data-volume-init.container",
@@ -75,7 +75,6 @@ class TestFreshHost:
             "etc/containers/systemd/app--db.container",
             "etc/containers/systemd/app--main.container",
         ]
-        assert fake_host.state_dir.is_dir()
 
     def test_started(self, fake_host, systemd):
         outcome = run_module(app(), state="started")
@@ -83,13 +82,13 @@ class TestFreshHost:
         assert outcome.msg == "quadlet files deployed and service started"
         assert systemd.log == [
             f"is-active {MAIN_SVC}",
-            f"is-active {MAIN_SVC}",
             "generator",
             "daemon-reload",
-            f"restart {INIT_SVC}",
-            f"is-active {MAIN_SVC}",
-            f"start {MAIN_SVC}",
+            f"list-dependencies --all --type service {MAIN_SVC}",
+            # Restarting a unit that is not running starts it
+            f"restart {INIT_SVC} {MAIN_SVC}",
         ]
+        assert os.listdir(fake_host.state_dir) == ["app--data.1000_1000.done"]
 
     def test_restarted(self, fake_host, systemd):
         systemd.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
@@ -97,11 +96,10 @@ class TestFreshHost:
 
         assert outcome.msg == "quadlet files deployed and service restarted"
         assert systemd.log == [
-            f"is-active {MAIN_SVC}",
             "generator",
             "daemon-reload",
-            f"list-dependencies --type service {MAIN_SVC}",
-            # One transaction: changed bootstrap units first, then dependencies, then main
+            f"list-dependencies --all --type service {MAIN_SVC}",
+            # One transaction: pending bootstrap units first, then dependencies, then main
             f"restart {INIT_SVC} app--db.service {MAIN_SVC}",
         ]
 
@@ -115,7 +113,7 @@ class TestFreshHost:
         assert files["srv/app/init/main/seed.sql"] == "SELECT 1;\n"
         assert files["srv/app/config/main/sub/app.conf"] == "x=1\n"
         assert files["etc/containers/systemd/app--data.volume"] == (
-            "[Volume]\nVolumeName=app--data\n"
+            "[Volume]\nVolumeName=app--data\nUser=1000\nGroup=1000\n"
         )
 
 
@@ -124,12 +122,12 @@ class TestUnchanged:
         outcome = run_module(app(), state="installed")
         assert outcome.exit["changed"] is False
         assert outcome.msg == "application already up to date"
-        assert deployed.log == [f"is-active {MAIN_SVC}"]
+        assert deployed.log == []
 
     def test_started_and_running_is_a_no_op(self, deployed):
         outcome = run_module(app(), state="started")
         assert outcome.exit["changed"] is False
-        assert deployed.log == [f"is-active {MAIN_SVC}", f"is-active {MAIN_SVC}"]
+        assert deployed.log == [f"is-active {MAIN_SVC}"]
 
     def test_started_but_stopped_only_starts(self, deployed):
         deployed.active.discard(MAIN_SVC)
@@ -137,7 +135,6 @@ class TestUnchanged:
         assert outcome.changed
         # No reload and no generator run: no file changed
         assert deployed.log == [
-            f"is-active {MAIN_SVC}",
             f"is-active {MAIN_SVC}",
             f"is-active {MAIN_SVC}",
             f"start {MAIN_SVC}",
@@ -151,11 +148,38 @@ class TestUnchanged:
             assert outcome.changed
             assert deployed.state_changes == [["restart", "app--db.service", MAIN_SVC]]
 
-    def test_unchanged_bootstrap_units_are_not_restarted(self, deployed):
+    def test_applied_bootstrap_units_are_not_restarted(self, deployed):
         # main requires its bootstrap unit, so the dependency walk finds it - and it is left out
         deployed.dependencies[MAIN_SVC] = [INIT_SVC, "app--db.service"]
         run_module(app(), state="restarted")
         assert deployed.state_changes == [["restart", "app--db.service", MAIN_SVC]]
+
+    def test_started_reruns_a_bootstrap_whose_marker_is_gone(self, deployed, fake_host):
+        """Deleting the marker is how the docs say to re-run the chown, and a deploy does it."""
+        (fake_host.state_dir / "app--data.1000_1000.done").unlink()
+
+        outcome = run_module(app(), state="started")
+
+        assert outcome.changed
+        assert deployed.state_changes == [["restart", INIT_SVC]]
+        assert os.listdir(fake_host.state_dir) == ["app--data.1000_1000.done"]
+
+    def test_started_but_stopped_runs_a_pending_bootstrap_first(self, deployed, fake_host):
+        # The bootstrap unit stays active after running, so starting main would not run it again
+        deployed.active.discard(MAIN_SVC)
+        (fake_host.state_dir / "app--data.1000_1000.done").unlink()
+
+        run_module(app(), state="started")
+
+        assert deployed.state_changes == [["restart", INIT_SVC], ["start", MAIN_SVC]]
+
+    def test_installed_leaves_a_pending_bootstrap_alone(self, deployed, fake_host):
+        (fake_host.state_dir / "app--data.1000_1000.done").unlink()
+
+        outcome = run_module(app(), state="installed")
+
+        assert outcome.exit["changed"] is False
+        assert deployed.state_changes == []
 
 
 class TestChanged:
@@ -175,11 +199,15 @@ class TestChanged:
         assert outcome.changed
         assert deployed.state_changes == [["daemon-reload"]]
 
-    def test_started_but_stopped_starts_instead_of_restarting(self, deployed):
+    def test_started_but_stopped_restarts_the_app_too(self, deployed):
+        """db may still be running its old definition; starting main alone would leave it so."""
         deployed.active.discard(MAIN_SVC)
+        deployed.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
         run_module(app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="started")
-        # Pinned: db changed and may be running, but only main is started
-        assert deployed.state_changes == [["daemon-reload"], ["start", MAIN_SVC]]
+        assert deployed.state_changes == [
+            ["daemon-reload"],
+            ["restart", "app--db.service", MAIN_SVC],
+        ]
 
     def test_owner_change_reruns_its_bootstrap_unit_in_the_same_transaction(self, deployed):
         deployed.dependencies[MAIN_SVC] = [INIT_SVC]
@@ -209,31 +237,49 @@ class TestChanged:
             ["restart", INIT_SVC, "app--db.service", MAIN_SVC],
         ]
 
-    def test_owner_change_without_restart_still_reruns_the_bootstrap(self, deployed):
-        run_module(app(quadlets={"data.volume": "[Volume]\nX-Owner=2000:2000\n"}), state="installed")
-        assert deployed.state_changes == [["daemon-reload"], ["restart", INIT_SVC]]
+    def test_owner_change_under_installed_waits_for_the_next_start(self, deployed, fake_host):
+        """
+        Re-running a bootstrap unit restarts every container mounting its volume, which installed
+        must not do. The next run allowed to restart them applies the new owner.
+        """
+        changed = app(quadlets={"data.volume": "[Volume]\nX-Owner=2000:2000\n"})
 
-    def test_stale_marker_is_removed_on_owner_change(self, deployed, fake_host):
-        (fake_host.state_dir / "app--data.1000_1000.done").write_text("")
-        run_module(app(quadlets={"data.volume": "[Volume]\nX-Owner=2000:2000\n"}), state="installed")
-        assert list(fake_host.state_dir.iterdir()) == []
+        run_module(changed, state="installed")
 
-    def test_markers_are_left_alone_when_nothing_changed(self, deployed, fake_host):
+        assert deployed.state_changes == [["daemon-reload"]]
+        # The marker still says what the volume is actually owned by
+        assert os.listdir(fake_host.state_dir) == ["app--data.1000_1000.done"]
+
+        deployed.calls.clear()
+        outcome = run_module(changed, state="started")
+
+        assert outcome.changed
+        assert deployed.state_changes == [["restart", INIT_SVC]]
+        assert os.listdir(fake_host.state_dir) == ["app--data.2000_2000.done"]
+
+    def test_the_bootstrap_replaces_the_previous_marker(self, deployed, fake_host):
+        run_module(app(quadlets={"data.volume": "[Volume]\nX-Owner=2000:2000\n"}), state="started")
+        assert os.listdir(fake_host.state_dir) == ["app--data.2000_2000.done"]
+
+    def test_the_module_never_removes_a_marker_itself(self, deployed, fake_host):
         stale = fake_host.state_dir / "app--data.5_5.done"
         stale.write_text("")
-        run_module(app(), state="started")
-        # Pinned: marker cleanup only runs as part of writing files
+
+        run_module(app(), state="started", force=True)
+
+        # Only the bootstrap unit removes markers, and it had nothing to do
         assert stale.exists()
 
 
 class TestForce:
-    def test_rewrites_and_reruns_everything(self, deployed):
-        deployed.dependencies[MAIN_SVC] = ["app--db.service"]
+    def test_rewrites_and_restarts_everything(self, deployed):
+        deployed.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
         outcome = run_module(app(), state="started", force=True)
         assert outcome.changed
+        # Except the bootstrap unit: its marker is in place, so it would only be skipped
         assert deployed.state_changes == [
             ["daemon-reload"],
-            ["restart", INIT_SVC, "app--db.service", MAIN_SVC],
+            ["restart", "app--db.service", MAIN_SVC],
         ]
 
     def test_restarts_timers(self, fake_host, systemd):
@@ -248,7 +294,6 @@ class TestTimers:
         outcome = run_module(with_timer(), state="installed")
         assert outcome.exit["unit_files"] == ["app--job.timer"]
         assert systemd.log == [
-            f"is-active {MAIN_SVC}",
             "is-enabled app--job.timer",
             "generator",
             "daemon-reload",
@@ -256,7 +301,6 @@ class TestTimers:
             "enable app--job.timer",
             # Changed, so restarted without asking whether it runs
             "restart app--job.timer",
-            f"restart {INIT_SVC}",
         ]
         assert fake_host.files()["etc/systemd/system/app--job.timer"] == (
             "[Timer]\nOnCalendar=daily\nUnit=app--job.service\n\n[Install]\nWantedBy=timers.target\n"
@@ -268,7 +312,6 @@ class TestTimers:
         outcome = run_module(with_timer(), state="installed")
         assert outcome.exit["changed"] is False
         assert systemd.log == [
-            f"is-active {MAIN_SVC}",
             "is-enabled app--job.timer",
             "is-active app--job.timer",
         ]
@@ -309,6 +352,13 @@ class TestTimers:
         enables = [args[1] for args in systemd.state_changes if args[0] == "enable"]
         assert enables == ["app--a.timer", "app--b.timer"]
 
+    def test_a_quadlet_can_name_a_timer_of_the_app(self, fake_host, systemd):
+        files = with_timer(quadlets={"main.container": "[Unit]\nAfter=sshd.service job.timer\n\n"
+                                                       "[Container]\nImage=alpine\n"})
+        run_module(files, state="installed")
+        main = fake_host.files()["etc/containers/systemd/app--main.container"]
+        assert "After=sshd.service app--job.timer\n" in main
+
 
 class TestValidationInRun:
     def test_invalid_name(self, fake_host, systemd):
@@ -322,10 +372,15 @@ class TestValidationInRun:
         assert outcome.exit["application_name"] == "myapp"
         assert outcome.exit["service_name"] == "myapp--main.service"
 
-    def test_trailing_slash_src_without_name(self, fake_host, systemd):
-        # Pinned: the basename is empty
-        outcome = run_module(app(), src="/apps/app/", state="installed")
-        assert outcome.failure["msg"].startswith("Invalid application name: .")
+    @pytest.mark.parametrize("src", ["/apps/app/", "/apps/app//", "apps/app/."])
+    def test_trailing_slash_src_without_name(self, fake_host, systemd, src):
+        outcome = run_module(app(), src=src, state="installed")
+        assert outcome.exit["application_name"] == "app"
+
+    def test_name_with_a_trailing_newline(self, fake_host, systemd):
+        outcome = run_module(app(), name="app\n", state="installed")
+        assert outcome.failure["msg"].startswith("Invalid application name: app\n.")
+        assert fake_host.files() == {}
 
     def test_invalid_owner_writes_nothing(self, fake_host, systemd):
         outcome = run_module(app(quadlets={"data.volume": "[Volume]\nX-Owner=70000:0\n"}))
@@ -333,11 +388,15 @@ class TestValidationInRun:
         assert fake_host.files() == {}
         assert systemd.calls == []
 
-    def test_non_text_content_is_an_unexpected_error(self, fake_host, systemd):
-        # Pinned: a template that renders to a bare value reaches the module as an int
+    def test_content_that_cannot_be_written_is_reported(self, fake_host, systemd):
+        # The action plugin only ever sends text; this is for anything that gets past it
         files = app(config={"main": {"n": 42}})
         outcome = run_module(files, state="installed")
-        assert outcome.failure == {"msg": "Unexpected error: write() argument must be str, not int"}
+        path = fake_host.srv_dir / "app/config/main/n"
+        assert outcome.failure == {
+            "msg": f"Failed to write file {path}: write() argument must be str, not int"
+        }
+        assert not path.exists()
 
 
 def test_success_message_for_an_unknown_state():
@@ -345,7 +404,7 @@ def test_success_message_for_an_unknown_state():
     from ansible_collections.kriansa.commons.tests.unit._support.fakes import FakeModule
 
     module = QuadletAppModule(FakeModule({"src": "/a/app", "state": "other", "force": False,
-                                          "systemctl_timeout": 1}))
+                                          "systemctl_timeout": 1, "settle_time": 0}))
     assert module._get_success_message() == "quadlet files deployed"
     assert module._get_quadlet_filenames({"quadlets": [("x.container", "/p")]}) == [
         "app--x.container"
@@ -362,7 +421,7 @@ def test_main_coming_up_on_its_own_reports_no_change(deployed):
     Pinned race: main reads as stopped when the module decides it has work to do, and as
     running by the time it would start it. Nothing is done, and the run says so.
     """
-    deployed.scripted_states[MAIN_SVC] = ["inactive", "inactive", "active"]
+    deployed.scripted_states[MAIN_SVC] = ["inactive", "active"]
     outcome = run_module(app(), state="started")
     assert outcome.exit["changed"] is False
     assert outcome.msg == "quadlet files deployed and service started"

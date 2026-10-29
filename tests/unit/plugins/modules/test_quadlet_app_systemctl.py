@@ -24,7 +24,7 @@ MAIN = "[Container]\nImage=alpine\n"
 def make_module(systemctl_timeout=120):
     module = QuadletAppModule(
         FakeModule({"src": "/apps/app", "state": "started", "force": False,
-                    "systemctl_timeout": systemctl_timeout})
+                    "systemctl_timeout": systemctl_timeout, "settle_time": 0})
     )
     module.app_name = "app"
     return module
@@ -51,7 +51,7 @@ def raising(exc):
 
 
 class TestGenerator:
-    def test_failure_reports_the_generator_output(self, fake_host, systemd):
+    def test_failure_reports_the_generator_output_and_writes_nothing(self, fake_host, systemd):
         systemd.generator_result = (1, "partial", "converting \"app--main.container\": bad key\n")
         outcome = run_module(make_files_data(quadlets={"main.container": MAIN}), state="started")
 
@@ -62,38 +62,98 @@ class TestGenerator:
             "stdout": "partial",
             "stderr": "converting \"app--main.container\": bad key\n",
         }
-        # Pinned: the files are already on disk by the time validation runs, and stay there
-        assert "etc/containers/systemd/app--main.container" in fake_host.files()
+        # Validation runs on a staged copy, before anything reaches the host
+        assert fake_host.files() == {}
         assert "daemon-reload" not in systemd.log
+
+    def test_validates_only_this_apps_quadlets(self, fake_host, systemd):
+        """Another app's file on the host - broken or not - has no say in this deploy."""
+        fake_host.quadlet_dir.mkdir(parents=True)
+        (fake_host.quadlet_dir / "other--main.container").write_text("[Container]\nBogusKey=1\n")
+        files = make_files_data(
+            quadlets={"main.container": MAIN, "data.volume": "[Volume]\n"},
+            units={"job.timer": "[Timer]\nOnCalendar=daily\n"},
+            config={"main": {"app.conf": "x\n"}},
+        )
+
+        run_module(files, state="installed")
+
+        [call] = systemd.generator_calls
+        assert call.unit_dirs != str(fake_host.quadlet_dir)
+        # Every quadlet the app deploys, generated ones included; no timers or config files
+        assert sorted(call.staged) == [
+            "app--data-volume-init.container", "app--data.volume", "app--main.container",
+        ]
+        assert call.staged["app--main.container"] == (
+            fake_host.files()["etc/containers/systemd/app--main.container"]
+        )
+
+    def test_quadlets_of_other_apps_it_names_are_validated_with_it(self, fake_host, systemd):
+        """
+        The generator cannot resolve a network of another app without its file. Those it names -
+        and those they name in turn - are staged; nothing else of the other apps is.
+        """
+        fake_host.quadlet_dir.mkdir(parents=True)
+        for name, content in {
+            "ing--main.network": "[Network]\n",
+            "ing--edge.pod": "[Pod]\nNetwork=ing--main.network\nVolume=ing--certs.volume:/c\n",
+            "ing--certs.volume": "[Volume]\n",
+            "ing--main.container": "[Container]\nBogusKey=1\n",
+        }.items():
+            (fake_host.quadlet_dir / name).write_text(content)
+        main = (
+            "[Container]\nImage=alpine\nNetwork=ing--main.network:ip=192.0.2.5\nPod=ing--edge.pod\n"
+            "Network=missing.network\nVolume=/srv/x:/x\n"
+        )
+
+        run_module(make_files_data(quadlets={"main.container": main}), state="installed")
+
+        [call] = systemd.generator_calls
+        assert sorted(call.staged) == [
+            "app--main.container", "ing--certs.volume", "ing--edge.pod", "ing--main.network",
+        ]
+
+    def test_retry_after_a_failure_validates_again(self, fake_host, systemd):
+        files = make_files_data(quadlets={"main.container": MAIN})
+        systemd.generator_result = (1, "", "bad\n")
+        assert run_module(files, state="started").failure
+
+        systemd.generator_result = (0, "", "")
+        outcome = run_module(files, state="started")
+
+        assert outcome.changed
+        assert len(systemd.generator_calls) == 2
+        assert "daemon-reload" in systemd.log
+        assert "etc/containers/systemd/app--main.container" in fake_host.files()
 
     def test_runs_with_a_fixed_timeout(self, fake_host, systemd):
         run_module(make_files_data(quadlets={"main.container": MAIN}), state="installed")
-        generator_calls = [call for call in systemd.calls if call.argv[0] == GENERATOR]
-        assert [(call.argv, call.timeout) for call in generator_calls] == [
+        assert [(call.argv, call.timeout) for call in systemd.generator_calls] == [
             ([GENERATOR, "-dryrun", "-v"], 30)
         ]
 
     def test_timeout(self, monkeypatch):
         install(monkeypatch, raising(subprocess.TimeoutExpired(GENERATOR, 30)))
         with pytest.raises(AnsibleFailJson) as excinfo:
-            make_module()._validate_quadlet_syntax()
+            make_module()._validate_quadlet_syntax({})
         assert excinfo.value.result["msg"] == f"{GENERATOR} -dryrun -v timed out"
 
     def test_cannot_be_executed(self, monkeypatch):
         install(monkeypatch, raising(FileNotFoundError("no such file")))
         with pytest.raises(AnsibleFailJson) as excinfo:
-            make_module()._validate_quadlet_syntax()
+            make_module()._validate_quadlet_syntax({})
         assert excinfo.value.result["msg"] == (
             "Failed to execute quadlet syntax validation: no such file"
         )
 
-    def test_unbound_result_if_failing_does_not_exit(self, monkeypatch):
-        # Pinned latent bug: only fail_json exiting keeps `result` from being read unbound
+    def test_a_generator_that_cannot_run_stops_there(self, monkeypatch):
+        """Even if fail_json returned, nothing would read the result of a run that never happened."""
         install(monkeypatch, raising(FileNotFoundError("x")))
         module = make_module()
-        module.module.fail_json = lambda **kwargs: None
-        with pytest.raises(UnboundLocalError):
-            module._validate_quadlet_syntax()
+        failures = []
+        module.module.fail_json = lambda **kwargs: failures.append(kwargs)
+        module._validate_quadlet_syntax({})
+        assert len(failures) == 1
 
 
 class TestSystemctl:
@@ -129,9 +189,9 @@ class TestSystemctl:
         assert excinfo.value.result["msg"] == "Failed to execute systemctl: exec format error"
 
     def test_failure_during_a_deploy(self, fake_host, systemd):
-        systemd.failures[("start", "app--main.service")] = (1, "Job failed\n")
+        systemd.failures[("restart", "app--main.service")] = (1, "Job failed\n")
         outcome = run_module(make_files_data(quadlets={"main.container": MAIN}), state="started")
-        assert outcome.failure["msg"] == "systemctl start app--main.service failed: Job failed"
+        assert outcome.failure["msg"] == "systemctl restart app--main.service failed: Job failed"
         assert outcome.failure["rc"] == 1
 
 
@@ -156,7 +216,7 @@ class TestDependencies:
         install(monkeypatch, lambda argv, **kw: seen.append((argv, kw["timeout"]))
                 or subprocess.CompletedProcess(argv, 0, "", ""))
         make_module()._get_app_dependencies("app--main.service")
-        assert seen == [(["systemctl", "list-dependencies", "--type", "service", "app--main.service"], 10)]
+        assert seen == [(["systemctl", "list-dependencies", "--all", "--type", "service", "app--main.service"], 10)]
 
     def test_failure_means_no_dependencies(self, monkeypatch):
         install(monkeypatch, returning(1, "", "Unit not found"))
@@ -241,20 +301,6 @@ class TestDeployFiles:
             os.umask(old_umask)
         assert oct((fake_host.srv_dir / "app/config/main").stat().st_mode & 0o777) == "0o755"
 
-    def test_markers_are_synced_before_any_file_is_written(self, fake_host, monkeypatch):
-        order = []
-        module = make_module()
-        monkeypatch.setattr(module, "_sync_volume_markers", lambda: order.append("markers"))
-        real_open = open
-
-        def recording_open(path, *args, **kwargs):
-            order.append("write")
-            return real_open(path, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.open", recording_open)
-        module._deploy_files({str(fake_host.quadlet_dir / "x.container"): "q"})
-        assert order == ["markers", "write"]
-
     def test_directory_cannot_be_created(self, fake_host, monkeypatch):
         module = make_module()
         real_makedirs = os.makedirs
@@ -278,3 +324,22 @@ class TestDeployFiles:
         with pytest.raises(AnsibleFailJson) as excinfo:
             module._deploy_files({str(target): "x"})
         assert excinfo.value.result["msg"].startswith(f"Failed to write file {target}: ")
+        assert os.listdir(target.parent) == ["f"]
+
+    @pytest.mark.parametrize("content, error", [
+        ("a\udcffb",
+         "'utf-8' codec can't encode character '\\udcff' in position 1: surrogates not allowed"),
+        (42, "write() argument must be str, not int"),
+    ])
+    def test_a_failed_write_leaves_the_previous_file_in_place(self, fake_host, content, error):
+        target = fake_host.srv_dir / "app/config/main/f"
+        target.parent.mkdir(parents=True)
+        target.write_text("old")
+
+        with pytest.raises(AnsibleFailJson) as excinfo:
+            make_module()._deploy_files({str(target): content})
+
+        assert excinfo.value.result["msg"] == f"Failed to write file {target}: {error}"
+        assert target.read_text() == "old"
+        # Nor is anything left behind next to it
+        assert os.listdir(target.parent) == ["f"]

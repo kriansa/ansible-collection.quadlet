@@ -1,4 +1,4 @@
-"""Volume ownership: X-Owner parsing and validation, the generated bootstrap unit, marker cleanup."""
+"""Volume ownership: X-Owner parsing and validation, the generated bootstrap unit, its markers."""
 
 import os
 
@@ -9,9 +9,8 @@ from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import (
     ValidationError,
 )
 from ansible_collections.kriansa.commons.tests.unit._support.fakes import (
-    AnsibleFailJson,
     FakeModule,
-    raiser,
+    run_bootstrap_unit,
 )
 
 
@@ -24,8 +23,10 @@ def make_module(name="app"):
                 "state": "started",
                 "force": False,
                 "systemctl_timeout": 120,
+                "settle_time": 0,
                 "_control_node_processed": True,
-                "_files_data": None,
+                "_files": None,
+                "_contents": None,
             }
         )
     )
@@ -61,9 +62,9 @@ class TestCollectVolumeOwners:
             ("  X-Owner=5:5", "5:5"),
             ("X-Owner= 5:5 ", "5:5"),
             ("# X-Owner=5:5", "0:0"),
-            # Pinned: with a space before "=" the directive is not recognised and the volume
-            # silently falls back to root
-            ("X-Owner = 5:5", "0:0"),
+            # systemd syntax allows whitespace around "="
+            ("X-Owner = 5:5", "5:5"),
+            ("X-Owner\t=5:5", "5:5"),
         ],
     )
     def test_line_forms(self, line, expected):
@@ -132,53 +133,56 @@ def test_volume_init_unit_text():
         "Type=oneshot\n"
         "RemainAfterExit=yes\n"
         "TimeoutStartSec=1800\n"
+        "ExecStartPost=/usr/bin/mkdir -p /var/lib/quadlet-app\n"
+        "ExecStartPost=/usr/bin/find /var/lib/quadlet-app -maxdepth 1 "
+        "-regex '.*/myapp--data[.][^./]+_[^./]+[.]done' -delete\n"
         "ExecStartPost=/usr/bin/touch /var/lib/quadlet-app/myapp--data.10000_10001.done\n"
     )
 
 
-class TestSyncVolumeMarkers:
-    def module_with(self, owners):
+class TestBootstrapMarkers:
+    """What the bootstrap unit does to the markers when systemd runs it, acted out by the fake."""
+
+    @staticmethod
+    def unit(owner="1000:1000"):
         module = make_module()
         module.app_name = "app"
-        module.volume_owners = owners
-        return module
+        return module._volume_init_unit("data", owner)
 
     def test_creates_the_state_directory(self, fake_host):
-        self.module_with({})._sync_volume_markers()
-        assert fake_host.state_dir.is_dir()
+        assert run_bootstrap_unit(self.unit())
+        assert os.listdir(fake_host.state_dir) == ["app--data.1000_1000.done"]
 
-    def test_removes_only_stale_markers_of_declared_volumes(self, fake_host):
+    def test_replaces_only_this_volumes_previous_markers(self, fake_host):
         fake_host.state_dir.mkdir(parents=True)
         for name in [
-            "app--data.0_0.done",  # stale: data is now owned by 1000
-            "app--data.1000_1000.done",  # current
+            "app--data.0_0.done",  # this volume, when it was owned by root
+            "app--data.5_5.done",  # and before that, if a marker was left behind
             "app--data2.5_5.done",  # a different volume whose name starts the same
-            "app--gone.5_5.done",  # a volume no longer declared: left behind
+            "app--data.v2.5_5.done",  # a volume named data.v2
             "other--data.0_0.done",  # another app
             "app--data.notes",  # not a marker
         ]:
             (fake_host.state_dir / name).write_text("")
 
-        self.module_with({"data": "1000:1000"})._sync_volume_markers()
+        assert run_bootstrap_unit(self.unit())
 
         assert sorted(os.listdir(fake_host.state_dir)) == [
             "app--data.1000_1000.done",
             "app--data.notes",
+            "app--data.v2.5_5.done",
             "app--data2.5_5.done",
-            "app--gone.5_5.done",
             "other--data.0_0.done",
         ]
 
-    def test_state_directory_cannot_be_created(self, fake_host, monkeypatch):
-        monkeypatch.setattr(os, "makedirs", raiser(OSError("ro fs")))
-        with pytest.raises(AnsibleFailJson) as excinfo:
-            self.module_with({})._sync_volume_markers()
-        assert excinfo.value.result["msg"] == f"Failed to prepare {fake_host.state_dir}: ro fs"
-
-    def test_stale_marker_cannot_be_removed(self, fake_host, monkeypatch):
+    def test_skipped_while_its_marker_exists(self, fake_host):
         fake_host.state_dir.mkdir(parents=True)
-        (fake_host.state_dir / "app--data.0_0.done").write_text("")
-        monkeypatch.setattr(os, "unlink", raiser(OSError("busy")))
-        with pytest.raises(AnsibleFailJson) as excinfo:
-            self.module_with({"data": "1:1"})._sync_volume_markers()
-        assert excinfo.value.result["msg"] == "Failed to remove stale marker app--data.0_0.done: busy"
+        for name in ["app--data.1000_1000.done", "app--data.0_0.done"]:
+            (fake_host.state_dir / name).write_text("")
+
+        assert not run_bootstrap_unit(self.unit())
+
+        assert sorted(os.listdir(fake_host.state_dir)) == [
+            "app--data.0_0.done",
+            "app--data.1000_1000.done",
+        ]

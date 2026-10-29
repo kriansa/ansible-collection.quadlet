@@ -26,10 +26,14 @@ def forbid_real_processes(monkeypatch):
 
 
 @pytest.fixture
-def systemd(monkeypatch):
+def systemd(monkeypatch, request):
     """A fake systemd answering the module's systemctl and generator calls."""
     fake = FakeSystemd()
+    if "fake_host" in request.fixturenames:
+        # Bootstrap units then leave their markers on the fake host, as they would on a real one
+        fake.quadlet_dir = str(request.getfixturevalue("fake_host").quadlet_dir)
     monkeypatch.setattr(quadlet_app, "subprocess", fake.as_subprocess_module())
+    monkeypatch.setattr(quadlet_app, "time", fake.as_time_module())
     return fake
 
 

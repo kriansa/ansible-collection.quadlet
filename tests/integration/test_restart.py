@@ -47,6 +47,22 @@ def test_changed_secondary_restarts_the_app_once(make_app, host):
     assert host.invocation_id(app.service("data-volume-init")) == init_id
 
 
+def test_changed_secondary_is_restarted_while_main_is_stopped(make_app, host):
+    app = make_app("mainstopped")
+    app.write("quadlets/main.container", container(unit="Wants=web.service\nAfter=web.service"))
+    app.write("quadlets/web.container", container("Environment=VERSION=1\n"))
+    app.deploy("started")
+    host.run(f"systemctl stop {app.service('main')}")
+
+    app.write("quadlets/web.container", container("Environment=VERSION=2\n"))
+    step = app.deploy("started")
+
+    assert step.changed
+    assert step.starts(app.service("web")) == 1
+    assert step.starts(app.service("main")) == 1
+    assert "VERSION=2" in env(host, app, "web")
+
+
 def test_owner_change_runs_the_bootstrap_before_main_starts(make_app, host):
     app = make_app("ownerchange")
     app.write("quadlets/main.container", container("Volume=data.volume:/data\n"))
@@ -70,11 +86,8 @@ def test_owner_change_runs_the_bootstrap_before_main_starts(make_app, host):
     assert host.stat(f"{mountpoint}/seed").owner == "2000:2000"
 
 
-def test_transitive_dependency_is_not_restarted(make_app, host):
-    """
-    Pinned: only main's direct dependencies are restarted. cache is two Requires= away, so its
-    new definition is deployed but the running container keeps the old one.
-    """
+def test_transitive_dependency_is_restarted_once(make_app, host):
+    """cache is two Requires= away from main; its new definition still has to take effect."""
     app = make_app("transitive")
     app.write("quadlets/main.container", container(unit="Requires=db.service\nAfter=db.service"))
     app.write("quadlets/db.container", container(unit="Requires=cache.service\nAfter=cache.service"))
@@ -86,8 +99,8 @@ def test_transitive_dependency_is_not_restarted(make_app, host):
 
     assert step.starts(app.service("main")) == 1
     assert step.starts(app.service("db")) == 1
-    assert step.starts(app.service("cache")) == 0
-    assert "VERSION=1" in env(host, app, "cache")
+    assert step.starts(app.service("cache")) == 1
+    assert "VERSION=2" in env(host, app, "cache")
 
 
 def test_unrelated_container_is_neither_started_nor_restarted(make_app, host):
@@ -109,22 +122,6 @@ def test_unrelated_container_is_neither_started_nor_restarted(make_app, host):
     assert step.changed
     assert step.starts(app.service("worker")) == 0
     assert "VERSION=1" in env(host, app, "worker")
-
-
-def test_main_stopped_by_hand_is_started_and_its_dependency_left_alone(make_app, host):
-    """Pinned: with main not running, a changed deploy only starts main."""
-    app = make_app("mainstopped")
-    app.write("quadlets/main.container", container(unit="Wants=db.service"))
-    app.write("quadlets/db.container", container("Environment=VERSION=1\n"))
-    app.deploy("started")
-    host.run(f"systemctl stop {app.service('main')}")
-
-    app.write("quadlets/db.container", container("Environment=VERSION=2\n"))
-    step = app.deploy("started")
-
-    assert step.starts(app.service("main")) == 1
-    assert step.starts(app.service("db")) == 0
-    assert "VERSION=1" in env(host, app, "db")
 
 
 def test_volume_of_a_secondary_container_changes_owner(make_app, host):

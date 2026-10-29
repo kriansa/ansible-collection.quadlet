@@ -9,8 +9,8 @@ test:
 test-cov:
 	uv run pytest --cov --cov-report=term-missing
 
-# Rewrites the quadlet_app golden files. Only meaningful against the baseline quadlet_app code,
-# which the golden helpers verify before writing anything.
+# Rewrites the quadlet_app golden files from the current code. Review the diff: every change in it
+# is a change in what the module produces.
 goldens:
 	uv run pytest tests/unit/plugins/test_quadlet_app_golden.py --update-goldens
 

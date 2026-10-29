@@ -15,6 +15,7 @@ import os
 
 # pylint: disable=import-error
 from ansible.errors import AnsibleError, AnsibleFileNotFound  # type: ignore[import-not-found]
+from ansible.module_utils.common.text.converters import to_text  # type: ignore[import-not-found]
 from ansible.plugins.action import ActionBase  # type: ignore[import-not-found]
 from ansible.template import trust_as_template  # type: ignore[import-not-found]
 
@@ -70,7 +71,8 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
             return result
 
         # Determine app name (normalize to lowercase)
-        app_name = self._task.args.get("name") or os.path.basename(src_path)
+        # normpath first: the basename of "apps/myapp/" is empty
+        app_name = self._task.args.get("name") or os.path.basename(os.path.normpath(src_path))
         app_name = app_name.lower()
 
         # Discover and template files
@@ -81,9 +83,11 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
             result["msg"] = f"Failed to process files on control node: {str(e)}"
             return result
 
-        # Pass templated content to module
+        # Pass templated content to module. Names and contents travel apart: contents hold secrets
+        # and are no_log, and Ansible masks every string of a no_log argument wherever it shows up
+        # in the output - names among them, it would turn "app--main.container" into "app--********"
         module_args = self._task.args.copy()
-        module_args["_files_data"] = files_data
+        module_args["_files"], module_args["_contents"] = self._split_files_data(files_data)
         module_args["_control_node_processed"] = True
 
         result.update(
@@ -95,6 +99,23 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
         )
 
         return result
+
+    @staticmethod
+    def _split_files_data(files_data):
+        """
+        Separate what is safe to log from what is not.
+
+        Returns:
+            (files, contents): files describes each file - its kind, and its name, or its container
+            directory and path - and contents holds the matching content at the same position
+        """
+        files, contents = [], []
+        for group, kind in (("quadlets", "quadlet"), ("units", "unit"), ("init", "init"),
+                            ("config", "config")):
+            for entry in files_data[group]:
+                files.append({"kind": kind, **{k: v for k, v in entry.items() if k != "content"}})
+                contents.append(entry["content"])
+        return files, contents
 
     def _resolve_src_path(self, src):
         """Resolve source path relative to playbook directory."""
@@ -208,6 +229,13 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
             # Read file content using Ansible's loader
             file_content = self._loader.get_text_file_contents(file_path)
 
+            # The loader does not refuse a file that is not UTF-8: it only warns, and hands over
+            # the text with each bad byte replaced by a placeholder character that cannot be
+            # written out again. Turning the placeholders back into the original bytes and
+            # decoding those strictly raises the error the loader held back, naming the first bad
+            # byte, before anything reaches the host.
+            file_content.encode("utf-8", "surrogateescape").decode("utf-8")
+
             # CRITICAL: Mark content as trusted for templating
             # This is required by Ansible's security mechanism
             trusted_content = trust_as_template(file_content)
@@ -229,7 +257,12 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
                 preserve_trailing_newlines=True,
             )
 
-            return templated_content
+            # A file that is a single expression, like "{{ port }}", renders to that expression's
+            # value - a number, a list, nothing at all - rather than to text. It becomes text the
+            # way Ansible's template module turns it into a file.
+            if templated_content is None:
+                return ""
+            return to_text(templated_content, nonstring="simplerepr")
 
         except UnicodeDecodeError as e:
             raise AnsibleError(f"File {file_path} is not valid UTF-8: {e}") from e
