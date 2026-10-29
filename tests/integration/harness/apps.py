@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ansible_collections.kriansa.commons.tests.integration.harness.host import Host
-from ansible_collections.kriansa.commons.tests.integration.harness.playbook import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.host import Host
+from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook import (
     PlaybookRun,
     PlaybookRunner,
     TaskResult,
@@ -118,7 +118,7 @@ class App:
 
     # --- deploying ---------------------------------------------------------------------------
 
-    def deploy(self, state: str = "started", *, module: str = "kriansa.commons.quadlet_app",
+    def deploy(self, state: str = "started", *, module: str = "kriansa.quadlet.quadlet_app",
                args: Optional[Dict[str, Any]] = None, task_vars: Optional[Dict[str, Any]] = None,
                play_vars: Optional[Dict[str, Any]] = None, pre_tasks: Optional[List[dict]] = None,
                become: bool = True, src: Optional[str] = None,

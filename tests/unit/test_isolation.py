@@ -10,8 +10,8 @@ from pathlib import Path
 
 from ansible.plugins.loader import lookup_loader
 
-from ansible_collections.kriansa.commons.plugins.action import quadlet_app as action_plugin
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app as module
+from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,5 +41,5 @@ def test_password_store_directory_does_not_exist():
 def test_only_the_isolated_collections_root_is_configured():
     roots = os.environ["ANSIBLE_COLLECTIONS_PATH"].split(os.pathsep)
     assert len(roots) == 1
-    linked = Path(roots[0]) / "ansible_collections" / "kriansa" / "commons"
+    linked = Path(roots[0]) / "ansible_collections" / "kriansa" / "quadlet"
     assert linked.resolve() == REPO_ROOT

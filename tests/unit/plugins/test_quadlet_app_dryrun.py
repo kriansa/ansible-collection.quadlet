@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.unit._support.examples import example_apps
-from ansible_collections.kriansa.commons.tests.unit._support.golden import GOLDEN_DIR
+from ansible_collections.kriansa.quadlet.tests.unit._support.examples import example_apps
+from ansible_collections.kriansa.quadlet.tests.unit._support.golden import GOLDEN_DIR
 
 QUADLET = Path("/usr/libexec/podman/quadlet")
 

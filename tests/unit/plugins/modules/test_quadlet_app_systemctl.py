@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app
-from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import QuadletAppModule
-from ansible_collections.kriansa.commons.tests.unit._support.fakes import (
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app
+from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import QuadletAppModule
+from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import (
     GENERATOR,
     AnsibleFailJson,
     FakeModule,
 )
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     make_files_data,
     run_module,
 )

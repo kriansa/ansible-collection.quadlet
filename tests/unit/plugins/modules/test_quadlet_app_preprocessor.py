@@ -8,7 +8,7 @@ deliberate change to its expectation.
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import QuadletPreprocessor
+from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import QuadletPreprocessor
 
 APP = "app"
 USERNS_BLOCK = (

@@ -6,7 +6,7 @@ Podman tells systemd a container is ready as soon as it starts, so `systemctl st
 for a container whose process dies a moment later.
 """
 
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     make_files_data,
     run_module,
 )

@@ -18,24 +18,24 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.integration.harness.apps import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import (
     App,
     leftover_apps,
     new_app_name,
     remove_from_host,
 )
-from ansible_collections.kriansa.commons.tests.integration.harness.host import Host
-from ansible_collections.kriansa.commons.tests.integration.harness.image import CACHE_DIR
-from ansible_collections.kriansa.commons.tests.integration.harness.playbook import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.host import Host
+from ansible_collections.kriansa.quadlet.tests.integration.harness.image import CACHE_DIR
+from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook import (
     PlaybookRunner,
     write_inventory,
 )
-from ansible_collections.kriansa.commons.tests.integration.harness.provision import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.provision import (
     create_overlay,
     ensure_test_image,
 )
-from ansible_collections.kriansa.commons.tests.integration.harness.qemu import Vm
-from ansible_collections.kriansa.commons.tests.integration.harness.seed import ensure_ssh_key
+from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
+from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import ensure_ssh_key
 
 REQUIRED_TOOLS = ("qemu-system-x86_64", "qemu-img", "xorriso", "ssh", "ssh-keygen")
 

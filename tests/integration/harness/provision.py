@@ -15,18 +15,18 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from ansible_collections.kriansa.commons.tests.integration.harness.image import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.image import (
     CACHE_DIR,
     IMAGE_SHA256,
     ensure_base_image,
 )
-from ansible_collections.kriansa.commons.tests.integration.harness.playbook import (
+from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook import (
     INTEGRATION_DIR,
     PlaybookRunner,
     write_inventory,
 )
-from ansible_collections.kriansa.commons.tests.integration.harness.qemu import Vm
-from ansible_collections.kriansa.commons.tests.integration.harness.seed import build_seed, ensure_ssh_key
+from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
+from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import build_seed, ensure_ssh_key
 
 REPO_ROOT = INTEGRATION_DIR.parents[1]
 PROVISION_PLAYBOOK = INTEGRATION_DIR / "playbooks" / "provision.yml"

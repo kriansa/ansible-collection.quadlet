@@ -13,10 +13,10 @@ from ansible.errors import AnsibleActionFail
 from ansible.parsing.vault import VaultLib, VaultSecret
 from ansible.template import trust_as_template
 
-from ansible_collections.kriansa.commons.plugins.action import quadlet_app as action_plugin
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app as module
-from ansible_collections.kriansa.commons.tests.unit._support.action import make_action, run_action
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
+from ansible_collections.kriansa.quadlet.tests.unit._support.action import make_action, run_action
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     files_data_to_tree,
     from_module_args,
 )
@@ -64,7 +64,7 @@ class TestRun:
     def test_module_call(self, playbook_dir):
         run = deploy(playbook_dir, MAIN, args={"state": "started", "systemctl_timeout": 5},
                      task_vars={"inventory_hostname": "h"})
-        assert run.module_name == "kriansa.commons.quadlet_app"
+        assert run.module_name == "kriansa.quadlet.quadlet_app"
         assert run.module_args == {
             "src": "myapp",
             "state": "started",

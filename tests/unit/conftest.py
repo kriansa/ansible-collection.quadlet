@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app
-from ansible_collections.kriansa.commons.tests.unit._support.fakes import FakeSystemd
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app
+from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import FakeSystemd
 
 
 class _NoProcesses:

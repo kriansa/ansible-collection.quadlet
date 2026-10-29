@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     make_files_data,
     run_module,
 )

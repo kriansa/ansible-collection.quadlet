@@ -54,7 +54,7 @@ def make_action(action_class, *, basedir: Path, args: Dict[str, Any],
     templar = Templar(loader=loader, variables=dict(task_vars or {}))
 
     task = MagicMock(name="task")
-    task.action = "kriansa.commons.quadlet_app"
+    task.action = "kriansa.quadlet.quadlet_app"
     task.args = dict(args)
     task.vars = dict(task_level_vars or {})
     task.async_val = async_val

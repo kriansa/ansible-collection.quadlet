@@ -14,22 +14,22 @@ import re
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.unit._support.examples import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.examples import (
     example_apps,
     example_vars,
 )
-from ansible_collections.kriansa.commons.tests.unit._support.golden import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.golden import (
     GOLDEN_DIR,
     check_json,
     check_tree,
     read_tree,
 )
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     deploy_fresh,
     files_data_to_tree,
     tree_to_files_data,
 )
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app_render import render_app
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app_render import render_app
 
 APPS = example_apps()
 GOLDEN = GOLDEN_DIR / "quadlet_app"

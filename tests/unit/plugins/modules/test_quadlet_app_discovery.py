@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import (
+from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import (
     QuadletFileDiscovery,
     ValidationError,
 )
-from ansible_collections.kriansa.commons.tests.unit._support.fakes import raiser
+from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import raiser
 
 
 def write(root: Path, rel: str, content: str = "x") -> Path:

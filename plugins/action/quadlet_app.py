@@ -92,7 +92,7 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
 
         result.update(
             self._execute_module(
-                module_name="kriansa.commons.quadlet_app",
+                module_name="kriansa.quadlet.quadlet_app",
                 module_args=module_args,
                 task_vars=task_vars,
             )

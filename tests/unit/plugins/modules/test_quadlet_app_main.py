@@ -10,8 +10,8 @@ import yaml
 from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import (
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     make_files_data,
     to_module_args,
 )

@@ -6,5 +6,4 @@ plugins/modules/quadlet_app.py validate-modules:doc-elements-mismatch # internal
 plugins/modules/quadlet_app.py validate-modules:import-before-documentation # pre-existing; not addressed by the test work
 plugins/modules/quadlet_app.py validate-modules:missing-gplv3-license # this collection is Apache-2.0
 plugins/modules/quadlet_app.py validate-modules:undocumented-parameter # internal parameters set by the action plugin
-roles/tunneled_ssh_operator/files/wg-reresolve-dns shebang # a script deployed as-is, not a module
 tests/fixtures/apps/webapp/config/api/settings.yaml yamllint!skip # a Jinja template with a for loop, not YAML until rendered

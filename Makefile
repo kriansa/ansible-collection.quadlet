@@ -32,4 +32,4 @@ vm-up:
 
 # Drop the cached base and test images (they are rebuilt on the next integration run)
 vm-clean:
-	rm -rf "$${XDG_CACHE_HOME:-$$HOME/.cache}/kriansa-commons-tests/vm"
+	rm -rf "$${XDG_CACHE_HOME:-$$HOME/.cache}/kriansa-quadlet-tests/vm"

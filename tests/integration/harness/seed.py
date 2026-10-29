@@ -21,7 +21,7 @@ def ensure_ssh_key(directory: Path) -> Tuple[Path, str]:
     private = directory / "id_ed25519"
     if not private.exists():
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "kriansa-commons-tests", "-f", str(private)],
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "kriansa-quadlet-tests", "-f", str(private)],
             check=True,
         )
     return private, (directory / "id_ed25519.pub").read_text().strip()

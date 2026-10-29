@@ -14,7 +14,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from ansible_collections.kriansa.commons.tests.integration.harness.qemu import Vm
+from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
 
 # systemd's catalog ids for "unit started" and "unit stopped"
 UNIT_STARTED = "39f53479d3a045ac8e11786248231fbf"

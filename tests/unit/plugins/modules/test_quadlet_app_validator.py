@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import (
+from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import (
     QuadletValidator,
     ValidationError,
 )

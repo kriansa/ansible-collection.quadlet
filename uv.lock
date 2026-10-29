@@ -305,7 +305,7 @@ wheels = [
 ]
 
 [[package]]
-name = "kriansa-commons-tests"
+name = "kriansa-quadlet-tests"
 version = "0"
 source = { virtual = "." }
 default-groups = ["test"]

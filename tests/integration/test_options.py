@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.integration.harness.apps import DEPLOY_TASK, IDLE, IMAGE
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import DEPLOY_TASK, IDLE, IMAGE
 
 pytestmark = pytest.mark.integration
 
@@ -70,7 +70,7 @@ def test_async_is_rejected(make_app, host):
     play = {
         "hosts": "testhost", "gather_facts": False, "become": True,
         "tasks": [{"name": DEPLOY_TASK, "async": 60, "poll": 5,
-                   "kriansa.commons.quadlet_app": {"src": f"apps/{app.name}"}}],
+                   "kriansa.quadlet.quadlet_app": {"src": f"apps/{app.name}"}}],
     }
 
     run = app.runner.run_plays([play], app.playbook_dir, name="async")
@@ -86,7 +86,7 @@ def test_loop_over_several_apps(make_app, host):
     play = {
         "hosts": "testhost", "gather_facts": False, "become": True,
         "tasks": [{"name": DEPLOY_TASK, "loop": [first.name, second.name],
-                   "kriansa.commons.quadlet_app": {"src": "apps/{{ item }}", "state": "started"}}],
+                   "kriansa.quadlet.quadlet_app": {"src": "apps/{{ item }}", "state": "started"}}],
     }
 
     run = first.runner.run_plays([play], first.playbook_dir, name="loop")

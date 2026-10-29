@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from ansible_collections.kriansa.commons.tests.integration.harness.seed import USER
+from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import USER
 
 _PR_SET_PDEATHSIG = 1
 

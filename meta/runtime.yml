@@ -1,0 +1,4 @@
+---
+# The action plugin marks file contents as templates with ansible.template.trust_as_template,
+# which first shipped in ansible-core 2.19
+requires_ansible: ">=2.19.0"

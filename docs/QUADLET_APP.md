@@ -35,7 +35,7 @@ myapp/
   - `main.container` is the only requirement
   - Files are deployed to `/etc/containers/systemd/`
   - Resource names are automatically prefixed with app name when deployed
-  - Contents in these files are automatically templated like `ansible.commons.template`
+  - Contents in these files are automatically templated like `ansible.builtin.template`
   - A `.timer` here is an error — it is not a quadlet type and belongs in `units/`
 
 - **units/**: Plain systemd units, currently `.timer` files — see [Timers](#timers)
@@ -371,7 +371,7 @@ journalctl -u myapp--backup.service         # what happened when it did
 
 ```yaml
 - name: Deploy nginx application
-  kriansa.commons.quadlet_app:
+  kriansa.quadlet.quadlet_app:
     src: apps/nginx
     state: started
 ```
@@ -380,7 +380,7 @@ journalctl -u myapp--backup.service         # what happened when it did
 
 ```yaml
 - name: Deploy database
-  kriansa.commons.quadlet_app:
+  kriansa.quadlet.quadlet_app:
     src: apps/postgres
     name: prod-db
     state: started
@@ -424,7 +424,7 @@ Task-level variables are supported:
 
 ```yaml
 - name: Deploy app
-  kriansa.commons.quadlet_app:
+  kriansa.quadlet.quadlet_app:
     src: apps/myapp
   vars:
     app_version: "2.0"

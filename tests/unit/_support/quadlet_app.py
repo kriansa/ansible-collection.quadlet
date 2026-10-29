@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ansible_collections.kriansa.commons.plugins.modules import quadlet_app as module
-from ansible_collections.kriansa.commons.tests.unit._support.fakes import (
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
+from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import (
     AnsibleExitJson,
     AnsibleFailJson,
     FakeModule,

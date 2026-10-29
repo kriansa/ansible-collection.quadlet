@@ -4,7 +4,7 @@ import builtins
 
 import pytest
 
-from ansible_collections.kriansa.commons.plugins.modules.quadlet_app import QuadletIdempotency
+from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import QuadletIdempotency
 
 
 @pytest.fixture

@@ -12,8 +12,8 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-copy_root="${XDG_CACHE_HOME:-$HOME/.cache}/kriansa-commons-tests/ansible-test"
-copy="$copy_root/ansible_collections/kriansa/commons"
+copy_root="${XDG_CACHE_HOME:-$HOME/.cache}/kriansa-quadlet-tests/ansible-test"
+copy="$copy_root/ansible_collections/kriansa/quadlet"
 ansible_test="$repo/.venv/bin/ansible-test"
 
 if [[ ! -x "$ansible_test" ]]; then

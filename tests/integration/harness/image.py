@@ -23,7 +23,7 @@ IMAGE_URLS = (
     f"https://vault.almalinux.org/10.2/cloud/x86_64/images/{IMAGE}",
 )
 
-CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "kriansa-commons-tests" / "vm"
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "kriansa-quadlet-tests" / "vm"
 
 
 def sha256_of(path: Path) -> str:

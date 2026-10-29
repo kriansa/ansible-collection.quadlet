@@ -26,7 +26,7 @@ make ansible-test-units # the unit tests, run the way ansible-test runs them
 installed copies of the collection, and the real passwordstore lookup, both of which tests must
 never touch; `tests/unit/test_isolation.py` checks that they cannot.
 
-Unit tests import code the way production does, through `ansible_collections.kriansa.commons...`.
+Unit tests import code the way production does, through `ansible_collections.kriansa.quadlet...`.
 An autouse fixture makes it impossible for a unit test to run a real process on this machine.
 
 ### Goldens

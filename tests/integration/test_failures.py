@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.integration.harness.apps import IDLE, IMAGE
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import IDLE, IMAGE
 
 pytestmark = pytest.mark.integration
 
@@ -150,7 +150,7 @@ def test_bad_src(make_app, host, src, message):
 def test_missing_src(make_app, host):
     app = make_app("nosrc")
     play = {"hosts": "testhost", "gather_facts": False, "become": True,
-            "tasks": [{"name": "deploy the app", "kriansa.commons.quadlet_app": {"state": "started"}}]}
+            "tasks": [{"name": "deploy the app", "kriansa.quadlet.quadlet_app": {"state": "started"}}]}
 
     run = app.runner.run_plays([play], app.playbook_dir, name="nosrc")
 

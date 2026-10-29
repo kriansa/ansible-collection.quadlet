@@ -36,18 +36,18 @@ def _isolate_ansible() -> Path:
     Returns:
         The directory containing `ansible_collections/`
     """
-    # When the checkout already sits at <root>/ansible_collections/kriansa/commons - as it does
+    # When the checkout already sits at <root>/ansible_collections/kriansa/quadlet - as it does
     # under ansible-test - that root can be used as it is
     if REPO_ROOT.parent.name == "kriansa" and REPO_ROOT.parent.parent.name == "ansible_collections":
         root = REPO_ROOT.parent.parent.parent
     else:
-        root = Path(tempfile.mkdtemp(prefix="kriansa-commons-tests-"))
+        root = Path(tempfile.mkdtemp(prefix="kriansa-quadlet-tests-"))
         namespace_dir = root / "ansible_collections" / "kriansa"
         namespace_dir.mkdir(parents=True)
-        (namespace_dir / "commons").symlink_to(REPO_ROOT)
+        (namespace_dir / "quadlet").symlink_to(REPO_ROOT)
         atexit.register(shutil.rmtree, root, ignore_errors=True)
 
-    ansible_home = Path(tempfile.mkdtemp(prefix="kriansa-commons-ansible-home-"))
+    ansible_home = Path(tempfile.mkdtemp(prefix="kriansa-quadlet-ansible-home-"))
     atexit.register(shutil.rmtree, ansible_home, ignore_errors=True)
 
     os.environ.update(

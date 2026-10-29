@@ -10,9 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ansible_collections.kriansa.commons.plugins.action import quadlet_app as action_plugin
-from ansible_collections.kriansa.commons.tests.unit._support.action import run_action
-from ansible_collections.kriansa.commons.tests.unit._support.quadlet_app import from_module_args
+from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
+from ansible_collections.kriansa.quadlet.tests.unit._support.action import run_action
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import from_module_args
 
 
 def render_app(app_dir: Path, task_vars: Dict[str, Any], **args) -> Dict[str, List[Dict[str, Any]]]:

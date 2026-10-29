@@ -2,7 +2,7 @@
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.integration.harness.apps import IDLE, IMAGE
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import IDLE, IMAGE
 
 pytestmark = pytest.mark.integration
 
@@ -20,7 +20,7 @@ def test_name_argument_is_lowercased(make_app, host):
         assert host.active_state(f"{lowered}--main.service") == "active"
         assert host.exists(f"/etc/containers/systemd/{lowered}--main.container")
     finally:
-        from ansible_collections.kriansa.commons.tests.integration.harness.apps import remove_from_host
+        from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import remove_from_host
         remove_from_host(host, custom.lower())
 
 

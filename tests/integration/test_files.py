@@ -2,7 +2,7 @@
 
 import pytest
 
-from ansible_collections.kriansa.commons.tests.integration.harness.apps import IDLE, IMAGE
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import IDLE, IMAGE
 
 pytestmark = pytest.mark.integration
 
