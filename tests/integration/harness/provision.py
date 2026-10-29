@@ -1,9 +1,8 @@
 """
 The provisioned test host image: built once from the base image, cached, and reused.
 
-Its cache key covers everything that shapes it - the base image, the provisioning playbook, the
-podman role it runs and this harness - so changing any of them builds a fresh one rather than
-testing against a stale host.
+Its cache key covers everything that shapes it - the base image, the provisioning playbook and
+this harness - so changing any of them builds a fresh one rather than testing against a stale host.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook impo
 from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
 from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import build_seed, ensure_ssh_key
 
-REPO_ROOT = INTEGRATION_DIR.parents[1]
 PROVISION_PLAYBOOK = INTEGRATION_DIR / "playbooks" / "provision.yml"
 
 # Bump to force a rebuild after changing how the image is made in a way the key cannot see
@@ -55,10 +53,6 @@ def image_key(public_key: str) -> str:
     digest.update(HARNESS_VERSION.encode())
     digest.update(public_key.encode())
     digest.update(PROVISION_PLAYBOOK.read_bytes())
-    for path in sorted((REPO_ROOT / "roles" / "podman").rglob("*")):
-        if path.is_file():
-            digest.update(str(path.relative_to(REPO_ROOT)).encode())
-            digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
 

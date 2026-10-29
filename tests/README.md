@@ -69,9 +69,9 @@ Each pytest session (each xdist worker) boots a throwaway VM from a cached image
 
 1. An AlmaLinux 10 GenericCloud image (SELinux enforcing, a current podman) is downloaded once
    and checked against its pinned sha256.
-2. It is provisioned once with this collection's own `podman` role, plus pre-pulled images
-   (`tests/integration/playbooks/provision.yml`), and cached. Changing that playbook or the
-   podman role builds a new image automatically.
+2. It is provisioned once the way the `podman` role of `kriansa.commons` sets up a container host,
+   plus pre-pulled images (`tests/integration/playbooks/provision.yml`), and cached. Changing that
+   playbook builds a new image automatically.
 3. Every session boots a copy-on-write overlay of it, with no internet access - a test that
    would pull an image fails instead of depending on the network.
 

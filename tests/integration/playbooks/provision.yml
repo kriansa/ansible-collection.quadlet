@@ -1,16 +1,50 @@
 # Turns the stock cloud image into the test host, once. The result is cached as a disk image and
 # every test session boots a throwaway copy of it.
 #
-# The host is set up the way this collection sets up a container host - with its own podman role -
-# plus what makes tests fast and deterministic: images pulled ahead of time (tests run without
-# internet), and nothing in the background that could change state mid-test.
+# The host is set up the way the podman role of kriansa.commons sets up a container host, plus what
+# makes tests fast and deterministic: images pulled ahead of time (tests run without internet), and
+# nothing in the background that could change state mid-test.
 - name: Provision the integration test host
   hosts: testhost
   become: true
   gather_facts: true
-  roles:
-    - kriansa.commons.podman
   tasks:
+    # The first five tasks are that podman role's, for an Enterprise Linux host. They are copied
+    # rather than used so these tests depend on no other collection.
+
+    # netavark, podman's default network backend, shells out to `nft` for its firewall rules
+    - name: Install nftables
+      ansible.builtin.dnf:
+        name: nftables
+        state: present
+
+    - name: Install podman
+      ansible.builtin.package:
+        name: podman
+
+    - name: Create the podman socket drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/podman.socket.d
+        state: directory
+        mode: "0755"
+
+    - name: Permit the podman socket to the wheel group
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/podman.socket.d/override.conf
+        mode: "0644"
+        content: |
+          [Socket]
+          SocketGroup=wheel
+
+    # The range UserNS=auto allocates container user namespaces from
+    - name: Add uids to /etc/subuid and /etc/subgid
+      ansible.builtin.lineinfile:
+        create: true
+        mode: "0644"
+        path: /etc/{{ item }}
+        line: "containers:1000000:4294836225"
+      loop: [subuid, subgid]
+
     # The module's mount options rely on SELinux labels, so tests without it would prove nothing
     - name: SELinux must be enforcing
       ansible.builtin.assert:
