@@ -9,6 +9,8 @@ import os
 
 import pytest
 
+from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app
+from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import AnsibleFailJson, FakeModule
 from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     make_files_data,
     run_module,
@@ -399,16 +401,26 @@ class TestValidationInRun:
         assert not path.exists()
 
 
-def test_success_message_for_an_unknown_state():
-    from ansible_collections.kriansa.quadlet.plugins.modules.quadlet_app import QuadletAppModule
-    from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import FakeModule
+def test_success_message_for_an_unknown_state(fake_host, systemd):
+    # The argument spec only allows the three states; this is for anything that gets past it
+    outcome = run_module(app(), state="other")
+    assert outcome.changed
+    assert outcome.msg == "quadlet files deployed"
 
-    module = QuadletAppModule(FakeModule({"src": "/a/app", "state": "other", "force": False,
-                                          "systemctl_timeout": 1, "settle_time": 0}))
-    assert module._get_success_message() == "quadlet files deployed"
-    assert module._get_quadlet_filenames({"quadlets": [("x.container", "/p")]}) == [
-        "app--x.container"
-    ]
+
+def test_anything_else_that_goes_wrong_is_reported_as_unexpected(fake_host, systemd):
+    # The action plugin only ever sends these four kinds of file; this is for anything that gets
+    # past it
+    fake = FakeModule({
+        "src": "/apps/app", "name": None, "state": "installed", "force": False,
+        "systemctl_timeout": 120, "settle_time": 0, "_control_node_processed": True,
+        "_files": [{"kind": "bogus", "name": "x"}], "_contents": [""],
+    })
+    with pytest.raises(AnsibleFailJson) as excinfo:
+        quadlet_app.QuadletAppModule(fake).run()
+    assert excinfo.value.result == {"msg": "Unexpected error: 'bogus'"}
+    assert fake_host.files() == {}
+    assert systemd.calls == []
 
 
 def test_single_letter_name(fake_host, systemd):

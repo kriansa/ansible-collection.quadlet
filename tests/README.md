@@ -13,7 +13,7 @@ make ansible-test-units # the unit tests, run the way ansible-test runs them
 
 | Layer | Where | What it proves |
 |---|---|---|
-| Unit | `tests/unit/plugins/{modules,action}/` | Every branch of the module and action plugin, error paths included, with systemd faked |
+| Unit | `tests/unit/plugins/{modules,module_utils,action}/` | Every branch of the module, its module_utils and the action plugin, error paths included, with systemd faked |
 | Golden | `tests/unit/plugins/test_quadlet_app_golden.py` | The example apps in `tests/fixtures/apps/` render and deploy exactly as their goldens record |
 | Validity | `tests/unit/plugins/test_quadlet_app_dryrun.py` | Every golden output is accepted by podman's own quadlet generator |
 | Integration | `tests/integration/` | Real deploys to a real host: systemd transactions, idmapped volumes, SELinux, timers |

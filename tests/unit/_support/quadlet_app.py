@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ansible_collections.kriansa.quadlet.plugins.module_utils import generator, systemctl
+from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import HostFile
+from ansible_collections.kriansa.quadlet.plugins.module_utils.quadlets import Volume
 from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
 from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import (
     AnsibleExitJson,
@@ -80,6 +83,21 @@ def tree_to_files_data(tree: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
             container, path = rest.split("/", 1)
             files_data[kind].append({"container": container, "path": path, "content": tree[rel]})
     return files_data
+
+
+def install_processes(monkeypatch, subprocess_module, time_module=None):
+    """
+    Stand in for every process the module starts - systemctl, journalctl and podman's generator -
+    and, if given, for its pauses.
+
+    Args:
+        subprocess_module: Takes the place of `subprocess` wherever the module starts a process
+        time_module: Takes the place of `time` where the module waits
+    """
+    for user in (systemctl, generator):
+        monkeypatch.setattr(user, "subprocess", subprocess_module)
+    if time_module is not None:
+        monkeypatch.setattr(systemctl, "time", time_module)
 
 
 @dataclass
@@ -195,19 +213,12 @@ def deploy_fresh(monkeypatch, files_data: Dict[str, Any], app_name: str, *,
     systemd = systemd or FakeSystemd()
     deployment = Deployment(systemd=systemd)
 
-    monkeypatch.setattr(module, "subprocess", systemd.as_subprocess_module())
-    monkeypatch.setattr(module, "time", systemd.as_time_module())
-    monkeypatch.setattr(module.QuadletIdempotency, "file_changed", lambda self, path, content: True)
+    install_processes(monkeypatch, systemd.as_subprocess_module(), systemd.as_time_module())
+    monkeypatch.setattr(HostFile, "differs_from_host", lambda self: True)
     # Nor any ownership marker, so every bootstrap unit is still to run
+    monkeypatch.setattr(Volume, "ownership_applied", lambda self: False)
     monkeypatch.setattr(
-        module.QuadletAppModule,
-        "_pending_volume_inits",
-        lambda self: [f"{self.app_name}--{stem}-volume-init.service" for stem in self.volume_owners],
-    )
-    monkeypatch.setattr(
-        module.QuadletAppModule,
-        "_deploy_files",
-        lambda self, processed: deployment.files.update(processed),
+        HostFile, "write", lambda self: deployment.files.update({self.dest_path: self.content})
     )
 
     fake = FakeModule(

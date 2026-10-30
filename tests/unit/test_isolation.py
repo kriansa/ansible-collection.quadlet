@@ -11,13 +11,14 @@ from pathlib import Path
 from ansible.plugins.loader import lookup_loader
 
 from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
+from ansible_collections.kriansa.quadlet.plugins.module_utils import constants
 from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_collection_code_comes_from_this_checkout():
-    for imported in (module, action_plugin):
+    for imported in (module, constants, action_plugin):
         real_path = Path(imported.__file__).resolve()
         assert real_path.is_relative_to(REPO_ROOT), real_path
         # A copy installed by ansible-galaxy or ansible-lint lives under some .ansible directory

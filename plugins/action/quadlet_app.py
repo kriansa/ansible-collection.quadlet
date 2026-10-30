@@ -19,14 +19,11 @@ from ansible.module_utils.common.text.converters import to_text  # type: ignore[
 from ansible.plugins.action import ActionBase  # type: ignore[import-not-found]
 from ansible.template import trust_as_template  # type: ignore[import-not-found]
 
+from ansible_collections.kriansa.quadlet.plugins.module_utils import (  # type: ignore[import-not-found]
+    constants,
+)
+
 # pylint: enable=import-error
-
-# Quadlet unit types, deployed where podman's generator picks them up
-VALID_QUADLET_EXTENSIONS = (".container", ".volume", ".network", ".pod", ".kube")
-
-# Plain systemd units, deployed from units/. Systemd reads these directly; podman's generator
-# never sees them.
-VALID_UNIT_EXTENSIONS = (".timer",)
 
 
 class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
@@ -167,12 +164,12 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
             if not os.path.isfile(file_path):
                 continue
 
-            if filename.endswith(VALID_UNIT_EXTENSIONS):
+            if filename.endswith(constants.VALID_UNIT_EXTENSIONS):
                 raise AnsibleError(
                     f"{filename} is a systemd unit, not a quadlet. Move it to units/."
                 )
 
-            if not filename.endswith(VALID_QUADLET_EXTENSIONS):
+            if not filename.endswith(constants.VALID_QUADLET_EXTENSIONS):
                 continue
 
             content = self._template_file(file_path, app_name)
@@ -191,10 +188,10 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
 
             # Strays are rejected rather than skipped: unlike quadlets/, this directory has no
             # history of holding anything else, so an unrecognized file is a mistake
-            if not filename.endswith(VALID_UNIT_EXTENSIONS):
+            if not filename.endswith(constants.VALID_UNIT_EXTENSIONS):
                 raise AnsibleError(
                     f"Unsupported file in units/: {filename}. "
-                    f"Only {', '.join(VALID_UNIT_EXTENSIONS)} files are supported."
+                    f"Only {', '.join(constants.VALID_UNIT_EXTENSIONS)} files are supported."
                 )
 
             content = self._template_file(file_path, app_name)

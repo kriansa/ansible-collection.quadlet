@@ -1,0 +1,4 @@
+# ansible-test configuration. The module code is written for Python 3.12 and newer, so ansible-test
+# must not compile or import it with the older Pythons ansible-core still supports on managed hosts.
+modules:
+  python_requires: ">=3.12"

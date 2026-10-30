@@ -1,6 +1,10 @@
 plugins/action/quadlet_app.py pylint:disallowed-name # pre-existing; not addressed by the test work
-plugins/modules/quadlet_app.py no-assert # pre-existing; not addressed by the test work
-plugins/modules/quadlet_app.py pylint:disallowed-name # pre-existing; not addressed by the test work
+plugins/module_utils/app.py pylint:unsupported-binary-operation # ansible-test lints target code as python 3.9; this code requires 3.12
+plugins/module_utils/app_module.py pylint:unsupported-binary-operation # ansible-test lints target code as python 3.9; this code requires 3.12
+plugins/module_utils/quadlets.py pylint:unpacking-non-sequence # follows from the unsupported-binary-operation below
+plugins/module_utils/quadlets.py pylint:unsupported-binary-operation # ansible-test lints target code as python 3.9; this code requires 3.12
+plugins/module_utils/sources.py pylint:unsupported-binary-operation # ansible-test lints target code as python 3.9; this code requires 3.12
+plugins/module_utils/unit_file.py pylint:unsupported-binary-operation # ansible-test lints target code as python 3.9; this code requires 3.12
 plugins/modules/quadlet_app.py validate-modules:doc-default-does-not-match-spec # internal parameter set by the action plugin
 plugins/modules/quadlet_app.py validate-modules:doc-elements-mismatch # internal parameter set by the action plugin
 plugins/modules/quadlet_app.py validate-modules:import-before-documentation # pre-existing; not addressed by the test work

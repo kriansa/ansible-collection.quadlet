@@ -14,7 +14,6 @@ from ansible.parsing.vault import VaultLib, VaultSecret
 from ansible.template import trust_as_template
 
 from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
-from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
 from ansible_collections.kriansa.quadlet.tests.unit._support.action import make_action, run_action
 from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import (
     files_data_to_tree,
@@ -316,11 +315,6 @@ class TestTemplating:
         # Ansible's template module does it
         out = self.render_one(playbook_dir, content, task_vars={"n": 42, "l": [1, 2], "none": None})
         assert out == text
-
-
-def test_extension_lists_match_the_module():
-    assert action_plugin.VALID_QUADLET_EXTENSIONS == module.VALID_QUADLET_EXTENSIONS
-    assert action_plugin.VALID_UNIT_EXTENSIONS == module.VALID_UNIT_EXTENSIONS
 
 
 def test_app_without_quadlets_directory_is_sent_anyway(playbook_dir):

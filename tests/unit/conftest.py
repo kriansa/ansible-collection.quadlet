@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app
+from ansible_collections.kriansa.quadlet.plugins.module_utils import constants
 from ansible_collections.kriansa.quadlet.tests.unit._support.fakes import FakeSystemd
+from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import install_processes
 
 
 class _NoProcesses:
@@ -22,7 +23,7 @@ class _NoProcesses:
 @pytest.fixture(autouse=True)
 def forbid_real_processes(monkeypatch):
     """No unit test may run systemctl or the quadlet generator on this machine."""
-    monkeypatch.setattr(quadlet_app, "subprocess", _NoProcesses)
+    install_processes(monkeypatch, _NoProcesses)
 
 
 @pytest.fixture
@@ -32,8 +33,7 @@ def systemd(monkeypatch, request):
     if "fake_host" in request.fixturenames:
         # Bootstrap units then leave their markers on the fake host, as they would on a real one
         fake.quadlet_dir = str(request.getfixturevalue("fake_host").quadlet_dir)
-    monkeypatch.setattr(quadlet_app, "subprocess", fake.as_subprocess_module())
-    monkeypatch.setattr(quadlet_app, "time", fake.as_time_module())
+    install_processes(monkeypatch, fake.as_subprocess_module(), fake.as_time_module())
     return fake
 
 
@@ -73,12 +73,12 @@ def fake_host(tmp_path, monkeypatch):
     """
     Point every path the module writes to at a temporary directory.
 
-    The module reads these constants when it builds its components, so the fixture must be in
-    place before the module object is created.
+    The module looks each path up in its constants every time it uses one, so changing them there
+    is enough, whenever the objects using them were created.
     """
     host = FakeHost(tmp_path / "host")
-    monkeypatch.setattr(quadlet_app, "QUADLET_SYSTEMD_DIR", str(host.quadlet_dir))
-    monkeypatch.setattr(quadlet_app, "SYSTEMD_UNIT_DIR", str(host.unit_dir))
-    monkeypatch.setattr(quadlet_app, "QUADLET_APP_BASE_DIR", str(host.srv_dir))
-    monkeypatch.setattr(quadlet_app, "QUADLET_APP_STATE_DIR", str(host.state_dir))
+    monkeypatch.setattr(constants, "QUADLET_SYSTEMD_DIR", str(host.quadlet_dir))
+    monkeypatch.setattr(constants, "SYSTEMD_UNIT_DIR", str(host.unit_dir))
+    monkeypatch.setattr(constants, "QUADLET_APP_BASE_DIR", str(host.srv_dir))
+    monkeypatch.setattr(constants, "QUADLET_APP_STATE_DIR", str(host.state_dir))
     return host
