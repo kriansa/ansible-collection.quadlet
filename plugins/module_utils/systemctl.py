@@ -61,7 +61,7 @@ class Systemd:
                 timeout=10,
             )
             return result.returncode == 0 and result.stdout.strip() == "active"
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:  # noqa: BLE001
             return False
 
     @staticmethod
@@ -76,7 +76,7 @@ class Systemd:
                 timeout=10,
             )
             return result.returncode == 0 and result.stdout.strip() == "enabled"
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:  # noqa: BLE001
             return False
 
     @staticmethod

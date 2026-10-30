@@ -9,13 +9,10 @@ a golden is a behaviour change: regenerate the goldens in the same commit, so it
 exactly what changed.
 """
 
-from __future__ import annotations
-
 import difflib
 import json
 import shutil
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 
@@ -23,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "tests" / "fixtures" / "golden"
 
 
-def read_tree(root: Path) -> Dict[str, str]:
+def read_tree(root: Path) -> dict[str, str]:
     """Every file under root, keyed by its path relative to root."""
     if not root.is_dir():
         return {}
@@ -35,7 +32,7 @@ def read_tree(root: Path) -> Dict[str, str]:
     return tree
 
 
-def write_tree(root: Path, files: Dict[str, str]) -> None:
+def write_tree(root: Path, files: dict[str, str]) -> None:
     """Replace root with exactly these files."""
     if root.exists():
         shutil.rmtree(root)
@@ -46,7 +43,7 @@ def write_tree(root: Path, files: Dict[str, str]) -> None:
             handle.write(content)
 
 
-def _describe(expected: Dict[str, str], actual: Dict[str, str], label: str) -> List[str]:
+def _describe(expected: dict[str, str], actual: dict[str, str], label: str) -> list[str]:
     problems = []
     for rel in sorted(expected.keys() - actual.keys()):
         problems.append(f"{label}/{rel}: missing (golden has it, the code no longer produces it)")
@@ -66,7 +63,7 @@ def _describe(expected: Dict[str, str], actual: Dict[str, str], label: str) -> L
     return problems
 
 
-def check_tree(request, root: Path, actual: Dict[str, str]) -> None:
+def check_tree(request, root: Path, actual: dict[str, str]) -> None:
     """
     Compare files against a golden tree, or rewrite the tree under --update-goldens.
 

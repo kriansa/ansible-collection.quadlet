@@ -72,8 +72,9 @@ def stub_value(term: str) -> str:
 class LookupModule(LookupBase):  # pylint: disable=too-few-public-methods
     """Deterministic passwordstore lookup."""
 
-    # Every term looked up in this process, in order
-    calls = []
+    # Every term looked up in this process, in order. Kept on the class rather than on an instance,
+    # so it gathers the lookups of every instance Ansible creates.
+    calls = []  # noqa: RUF012
 
     def run(self, terms, variables=None, **kwargs):
         values = []

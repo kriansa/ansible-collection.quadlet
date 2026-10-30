@@ -5,8 +5,6 @@ Its cache key covers everything that shapes it - the base image, the provisionin
 this harness - so changing any of them builds a fresh one rather than testing against a stale host.
 """
 
-from __future__ import annotations
-
 import fcntl
 import hashlib
 import subprocess
@@ -25,7 +23,10 @@ from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook impo
     write_inventory,
 )
 from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
-from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import build_seed, ensure_ssh_key
+from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import (
+    build_seed,
+    ensure_ssh_key,
+)
 
 PROVISION_PLAYBOOK = INTEGRATION_DIR / "playbooks" / "provision.yml"
 

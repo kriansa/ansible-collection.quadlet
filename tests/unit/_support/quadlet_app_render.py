@@ -5,17 +5,15 @@ Kept apart from quadlet_app.py because it imports controller code, which module 
 cannot.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from ansible_collections.kriansa.quadlet.plugins.action import quadlet_app as action_plugin
 from ansible_collections.kriansa.quadlet.tests.unit._support.action import run_action
 from ansible_collections.kriansa.quadlet.tests.unit._support.quadlet_app import from_module_args
 
 
-def render_app(app_dir: Path, task_vars: Dict[str, Any], **args) -> Dict[str, List[Dict[str, Any]]]:
+def render_app(app_dir: Path, task_vars: dict[str, Any], **args) -> dict[str, list[dict[str, Any]]]:
     """
     Stage A: run the action plugin over an app and return the files it sends, grouped.
 

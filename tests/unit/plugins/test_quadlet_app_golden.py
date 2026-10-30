@@ -97,6 +97,6 @@ def test_examples_cover_every_feature():
         if not any(re.search(pattern, rel.split("/", 1)[1]) for rel in files)
     ] + [
         feature for feature, pattern in CONTENT_FEATURES.items()
-        if not any(re.search(pattern, text, re.M | re.S) for text in files.values())
+        if not any(re.search(pattern, text, re.MULTILINE | re.DOTALL) for text in files.values())
     ]
     assert not missing, f"no example app exercises: {', '.join(missing)}"

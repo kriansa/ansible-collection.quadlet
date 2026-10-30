@@ -7,21 +7,20 @@ into a fail_json("Unexpected error: ...") - the test would then see a failure th
 for real.
 """
 
-from __future__ import annotations
-
 import os
 import re
 import shlex
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 
 class AnsibleExitJson(BaseException):
     """Raised where the real module would exit successfully."""
 
-    def __init__(self, kwargs: Dict[str, Any]):
+    def __init__(self, kwargs: dict[str, Any]):
         super().__init__(kwargs)
         self.result = kwargs
 
@@ -29,7 +28,7 @@ class AnsibleExitJson(BaseException):
 class AnsibleFailJson(BaseException):
     """Raised where the real module would exit with a failure."""
 
-    def __init__(self, kwargs: Dict[str, Any]):
+    def __init__(self, kwargs: dict[str, Any]):
         super().__init__(kwargs)
         self.result = kwargs
 
@@ -37,7 +36,7 @@ class AnsibleFailJson(BaseException):
 class FakeModule:
     """The slice of AnsibleModule the quadlet modules use."""
 
-    def __init__(self, params: Dict[str, Any]):
+    def __init__(self, params: dict[str, Any]):
         self.params = params
 
     def exit_json(self, **kwargs):
@@ -54,14 +53,14 @@ GENERATOR = "/usr/lib/systemd/system-generators/podman-system-generator"
 class Call:
     """One process the module started."""
 
-    argv: List[str]
-    timeout: Optional[float]
+    argv: list[str]
+    timeout: float | None
     # For a generator run: the directories it was pointed at, and the files in them at that moment
-    unit_dirs: Optional[str] = None
-    staged: Optional[Dict[str, str]] = None
+    unit_dirs: str | None = None
+    staged: dict[str, str] | None = None
 
     @property
-    def systemctl(self) -> Optional[List[str]]:
+    def systemctl(self) -> list[str] | None:
         """The systemctl arguments, or None when this was not a systemctl call."""
         return self.argv[1:] if self.argv[0] == "systemctl" else None
 
@@ -78,33 +77,33 @@ class FakeSystemd:
     active: set = field(default_factory=set)
     enabled: set = field(default_factory=set)
     # Main service -> the lines `systemctl list-dependencies --type service` prints for it
-    dependencies: Dict[str, List[str]] = field(default_factory=dict)
+    dependencies: dict[str, list[str]] = field(default_factory=dict)
     # A command prefix (e.g. ("start", "app--main.service")) -> (returncode, stderr)
-    failures: Dict[tuple, tuple] = field(default_factory=dict)
+    failures: dict[tuple, tuple] = field(default_factory=dict)
     generator_result: tuple = (0, "", "")
     # Called after each state-changing systemctl command, to model side effects
-    on_command: Optional[Callable[["FakeSystemd", List[str]], None]] = None
+    on_command: Callable[["FakeSystemd", list[str]], None] | None = None
     # Unit -> the answers its next `is-active` queries get, in order, before falling back to
     # `active`. Models a unit changing state on its own between two queries.
-    scripted_states: Dict[str, List[str]] = field(default_factory=dict)
+    scripted_states: dict[str, list[str]] = field(default_factory=dict)
     # Where the module wrote its quadlets. When set, starting an ownership bootstrap unit does what
     # it would on a host - see run_bootstrap_unit
-    quadlet_dir: Optional[str] = None
+    quadlet_dir: str | None = None
     # Unit -> its Type= as `systemctl show` reports it; "notify", as for a container, unless listed
-    types: Dict[str, str] = field(default_factory=dict)
+    types: dict[str, str] = field(default_factory=dict)
     # Units whose container exits right after it starts, leaving the unit failed
     exits_after_start: set = field(default_factory=set)
     # Units whose container keeps exiting and being started again by systemd: every pause of the
     # module finds them on a new run
     crash_loops: set = field(default_factory=set)
     # Unit -> what `journalctl` prints for it
-    journal: Dict[str, str] = field(default_factory=dict)
+    journal: dict[str, str] = field(default_factory=dict)
     # Unit -> how many times it has been started, which stands in for its InvocationID
-    invocations: Dict[str, int] = field(default_factory=dict)
+    invocations: dict[str, int] = field(default_factory=dict)
     failed: set = field(default_factory=set)
     # The pauses the module took, in seconds
-    sleeps: List[float] = field(default_factory=list)
-    calls: List[Call] = field(default_factory=list)
+    sleeps: list[float] = field(default_factory=list)
+    calls: list[Call] = field(default_factory=list)
 
     def run(self, argv, capture_output=False, text=False, check=False, timeout=None, env=None):
         del capture_output, text, check
@@ -213,11 +212,11 @@ class FakeSystemd:
         )
 
     @property
-    def generator_calls(self) -> List[Call]:
+    def generator_calls(self) -> list[Call]:
         return [call for call in self.calls if call.argv[0] == GENERATOR]
 
     @property
-    def log(self) -> List[str]:
+    def log(self) -> list[str]:
         """
         Every call as one readable line: systemctl's arguments, "generator" for a dry run, or the
         whole command for anything else.
@@ -230,12 +229,12 @@ class FakeSystemd:
         ]
 
     @property
-    def systemctl_calls(self) -> List[List[str]]:
+    def systemctl_calls(self) -> list[list[str]]:
         """The arguments of every systemctl call, in order."""
         return [call.systemctl for call in self.calls if call.systemctl is not None]
 
     @property
-    def state_changes(self) -> List[List[str]]:
+    def state_changes(self) -> list[list[str]]:
         """systemctl calls that change something, leaving out the read-only queries."""
         queries = ("is-active", "is-enabled", "list-dependencies", "show")
         return [args for args in self.systemctl_calls if args[0] not in queries]

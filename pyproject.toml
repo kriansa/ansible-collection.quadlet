@@ -42,3 +42,10 @@ plugins = ["plugins/", "*/ansible_collections/kriansa/quadlet/plugins/"]
 [tool.black]
 line-length = 100
 extend-exclude = "tests/fixtures/"
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ansible_collections"]

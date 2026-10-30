@@ -50,11 +50,8 @@ class AppServices:
             return not self.systemd.is_active(self.app.main_service) or bool(
                 self.pending_volume_inits
             )
-        if self.state == "restarted":
-            # Always restart when restarted state is requested
-            return True
-
-        return False
+        # Always restart when restarted state is requested
+        return self.state == "restarted"
 
     def apply(self, files_changed: bool) -> bool:
         """

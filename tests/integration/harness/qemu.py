@@ -1,7 +1,5 @@
 """One QEMU virtual machine: start it, wait until it can be logged into, stop it."""
 
-from __future__ import annotations
-
 import ctypes
 import json
 import signal
@@ -10,7 +8,6 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import USER
 
@@ -41,14 +38,14 @@ class Vm:
     disk: Path
     workdir: Path
     private_key: Path
-    seed: Optional[Path] = None
+    seed: Path | None = None
     internet: bool = False
     memory_mb: int = 3072
     cpus: int = 2
     port: int = field(default_factory=free_port)
     # Normally the VM is killed when the process that started it dies; --keep-vm needs it not to be
     outlive_parent: bool = False
-    process: Optional[subprocess.Popen] = None
+    process: subprocess.Popen | None = None
 
     @property
     def serial_log(self) -> Path:
@@ -81,14 +78,14 @@ class Vm:
             # pylint: disable-next=consider-using-with,subprocess-popen-preexec-fn
             self.process = subprocess.Popen(
                 argv,
-                preexec_fn=None if self.outlive_parent else _die_with_parent,
+                preexec_fn=None if self.outlive_parent else _die_with_parent,  # noqa: PLW1509
                 start_new_session=self.outlive_parent,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr,
             )
         return self
 
-    def ssh_argv(self, *command: str) -> List[str]:
+    def ssh_argv(self, *command: str) -> list[str]:
         return [
             "ssh", "-p", str(self.port), "-i", str(self.private_key),
             "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",

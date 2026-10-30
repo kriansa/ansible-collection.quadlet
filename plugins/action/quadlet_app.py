@@ -75,9 +75,9 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
         # Discover and template files
         try:
             files_data = self._discover_and_template_files(src_path, app_name)
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # noqa: BLE001
             result["failed"] = True
-            result["msg"] = f"Failed to process files on control node: {str(e)}"
+            result["msg"] = f"Failed to process files on control node: {e!s}"
             return result
 
         # Pass templated content to module. Names and contents travel apart: contents hold secrets

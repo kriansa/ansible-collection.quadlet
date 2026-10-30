@@ -21,9 +21,8 @@ SECRET = "s3cr3t-value-that-must-not-be-logged"
 
 def call_main(capsys, args):
     """Run main() and return the JSON it printed."""
-    with patch_module_args(args):
-        with pytest.raises(SystemExit):
-            quadlet_app.main()
+    with patch_module_args(args), pytest.raises(SystemExit):
+        quadlet_app.main()
     return json.loads(capsys.readouterr().out)
 
 

@@ -5,11 +5,9 @@ Only the parts that would reach a remote host are faked: the connection, and the
 ships the module there, which is captured instead.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
 from ansible.parsing.dataloader import DataLoader
@@ -21,18 +19,18 @@ from ansible.template import Templar
 class ActionRun:
     """What an action plugin produced."""
 
-    result: Dict[str, Any]
+    result: dict[str, Any]
     # The module it asked to run and the arguments it sent, or None if it never got that far
-    module_name: Optional[str]
-    module_args: Optional[Dict[str, Any]]
-    module_task_vars: Optional[Dict[str, Any]]
+    module_name: str | None
+    module_args: dict[str, Any] | None
+    module_task_vars: dict[str, Any] | None
 
 
-def make_action(action_class, *, basedir: Path, args: Dict[str, Any],
-                task_vars: Optional[Dict[str, Any]] = None,
-                task_level_vars: Optional[Dict[str, Any]] = None,
+def make_action(action_class, *, basedir: Path, args: dict[str, Any],
+                task_vars: dict[str, Any] | None = None,
+                task_level_vars: dict[str, Any] | None = None,
                 check_mode: bool = False, async_val: int = 0,
-                module_result: Optional[Dict[str, Any]] = None):
+                module_result: dict[str, Any] | None = None):
     """
     Build an action plugin instance wired to real Ansible objects.
 
@@ -66,7 +64,7 @@ def make_action(action_class, *, basedir: Path, args: Dict[str, Any],
 
     action = action_class(task, connection, PlayContext(), loader, templar, None)
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     def execute_module(module_name=None, module_args=None, task_vars=None, **_kwargs):
         captured.update(module_name=module_name, module_args=module_args, task_vars=task_vars)
@@ -76,7 +74,7 @@ def make_action(action_class, *, basedir: Path, args: Dict[str, Any],
     return action, captured
 
 
-def run_action(action_class, *, task_vars: Optional[Dict[str, Any]] = None, **kwargs) -> ActionRun:
+def run_action(action_class, *, task_vars: dict[str, Any] | None = None, **kwargs) -> ActionRun:
     """Build the plugin with make_action, run it, and report what happened."""
     action, captured = make_action(action_class, task_vars=task_vars, **kwargs)
     result = action.run(task_vars=dict(task_vars or {}))

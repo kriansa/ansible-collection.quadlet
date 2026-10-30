@@ -5,11 +5,9 @@ Layout: tests/fixtures/apps/<app>/{quadlets,units,init,config}/...
 They are all rendered with the variables in tests/fixtures/vars.yml.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from ansible.parsing.dataloader import DataLoader
 
@@ -33,11 +31,11 @@ class ExampleApp:
         return self.name
 
 
-def example_apps() -> List[ExampleApp]:
+def example_apps() -> list[ExampleApp]:
     """Every example app, sorted by name."""
     return [ExampleApp(app.name) for app in sorted(APPS_DIR.iterdir()) if app.is_dir()]
 
 
-def example_vars() -> Dict[str, Any]:
+def example_vars() -> dict[str, Any]:
     """The variables the apps are rendered with, loaded the way a playbook loads them."""
     return dict(DataLoader().load_from_file(str(VARS_FILE)) or {})

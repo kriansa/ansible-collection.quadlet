@@ -6,8 +6,6 @@ and a current podman. The image is pinned by name and checksum: a test run must 
 underneath us because the mirror published a new build.
 """
 
-from __future__ import annotations
-
 import hashlib
 import os
 import shutil

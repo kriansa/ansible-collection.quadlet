@@ -3,15 +3,13 @@ Apps under test: written to a playbook directory on the controller, deployed wit
 and removed from the VM afterwards.
 """
 
-from __future__ import annotations
-
 import itertools
 import os
 import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ansible_collections.kriansa.quadlet.tests.integration.harness.host import Host
 from ansible_collections.kriansa.quadlet.tests.integration.harness.playbook import (
@@ -78,7 +76,7 @@ class App:
         self.directory.mkdir(parents=True)
         self.host = host
         self.runner = runner
-        self.steps: List[Step] = []
+        self.steps: list[Step] = []
 
     # --- the app's files ---------------------------------------------------------------------
 
@@ -119,17 +117,17 @@ class App:
     # --- deploying ---------------------------------------------------------------------------
 
     def deploy(self, state: str = "started", *, module: str = "kriansa.quadlet.quadlet_app",
-               args: Optional[Dict[str, Any]] = None, task_vars: Optional[Dict[str, Any]] = None,
-               play_vars: Optional[Dict[str, Any]] = None, pre_tasks: Optional[List[dict]] = None,
-               become: bool = True, src: Optional[str] = None,
-               extra_args: Optional[List[str]] = None) -> Step:
+               args: dict[str, Any] | None = None, task_vars: dict[str, Any] | None = None,
+               play_vars: dict[str, Any] | None = None, pre_tasks: list[dict] | None = None,
+               become: bool = True, src: str | None = None,
+               extra_args: list[str] | None = None) -> Step:
         """
         Deploy the app with a real playbook and return what happened.
 
         The playbook lives next to apps/, so `src` is given relative to it, the way a real
         playbook refers to its app directories.
         """
-        task: Dict[str, Any] = {
+        task: dict[str, Any] = {
             "name": DEPLOY_TASK,
             module: {"src": src or f"apps/{self.name}", "state": state, **(args or {})},
         }
@@ -181,7 +179,7 @@ def remove_from_host(host: Host, name: str) -> None:
     )
 
 
-def leftover_apps(host: Host) -> List[str]:
+def leftover_apps(host: Host) -> list[str]:
     """Names of test apps that still have something on the VM."""
     out = host.output(
         "ls /etc/containers/systemd /etc/systemd/system /srv 2>/dev/null | grep -o '^qa[0-9a-z_-]*' "

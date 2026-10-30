@@ -6,10 +6,8 @@ Only module-side code is imported here: ansible-test runs module unit tests wher
 the action plugin lives in quadlet_app_render.py.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ansible_collections.kriansa.quadlet.plugins.module_utils import generator, systemctl
 from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import HostFile
@@ -28,7 +26,7 @@ FILE_KINDS = ("quadlets", "units", "init", "config")
 KIND_OF_GROUP = {"quadlets": "quadlet", "units": "unit", "init": "init", "config": "config"}
 
 
-def to_module_args(files_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def to_module_args(files_data: dict[str, Any] | None) -> dict[str, Any]:
     """
     Turn a set of app files into the module's arguments.
 
@@ -49,10 +47,10 @@ def to_module_args(files_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {"_files": files, "_contents": contents}
 
 
-def from_module_args(args: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+def from_module_args(args: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """The inverse of to_module_args: the files a module call carries, grouped again."""
     group_of = {kind: group for group, kind in KIND_OF_GROUP.items()}
-    files_data: Dict[str, List[Dict[str, Any]]] = {group: [] for group in FILE_KINDS}
+    files_data: dict[str, list[dict[str, Any]]] = {group: [] for group in FILE_KINDS}
     for entry, content in zip(args["_files"], args["_contents"]):
         files_data[group_of[entry["kind"]]].append(
             {**{key: value for key, value in entry.items() if key != "kind"}, "content": content}
@@ -60,7 +58,7 @@ def from_module_args(args: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     return files_data
 
 
-def files_data_to_tree(files_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, str]:
+def files_data_to_tree(files_data: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
     """Flatten app files, grouped as make_files_data groups them, into relative path -> content."""
     tree = {}
     for kind in ("quadlets", "units"):
@@ -72,9 +70,9 @@ def files_data_to_tree(files_data: Dict[str, List[Dict[str, Any]]]) -> Dict[str,
     return tree
 
 
-def tree_to_files_data(tree: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
+def tree_to_files_data(tree: dict[str, str]) -> dict[str, list[dict[str, Any]]]:
     """The inverse of files_data_to_tree, in the order the action plugin produces."""
-    files_data: Dict[str, List[Dict[str, Any]]] = {kind: [] for kind in FILE_KINDS}
+    files_data: dict[str, list[dict[str, Any]]] = {kind: [] for kind in FILE_KINDS}
     for rel in sorted(tree):
         kind, rest = rel.split("/", 1)
         if kind in ("quadlets", "units"):
@@ -105,17 +103,17 @@ class Deployment:
     """What one module run did."""
 
     # Absolute destination path -> content, for every file it wrote
-    files: Dict[str, str] = field(default_factory=dict)
-    exit: Optional[Dict[str, Any]] = None
-    failure: Optional[Dict[str, Any]] = None
-    systemd: Optional[FakeSystemd] = None
+    files: dict[str, str] = field(default_factory=dict)
+    exit: dict[str, Any] | None = None
+    failure: dict[str, Any] | None = None
+    systemd: FakeSystemd | None = None
 
     @property
-    def tree(self) -> Dict[str, str]:
+    def tree(self) -> dict[str, str]:
         """files, keyed relative to / so it can be stored as a golden tree."""
         return {path.lstrip("/"): content for path, content in self.files.items()}
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Everything but the file contents, for a JSON golden."""
         return {
             "exit": self.exit,
@@ -126,10 +124,10 @@ class Deployment:
         }
 
 
-def make_files_data(quadlets: Optional[Dict[str, str]] = None,
-                    units: Optional[Dict[str, str]] = None,
-                    init: Optional[Dict[str, Dict[str, str]]] = None,
-                    config: Optional[Dict[str, Dict[str, str]]] = None) -> Dict[str, Any]:
+def make_files_data(quadlets: dict[str, str] | None = None,
+                    units: dict[str, str] | None = None,
+                    init: dict[str, dict[str, str]] | None = None,
+                    config: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
     """
     Build the `_files_data` the action plugin would send.
 
@@ -158,8 +156,8 @@ def make_files_data(quadlets: Optional[Dict[str, str]] = None,
 class Outcome:
     """How one module run ended."""
 
-    exit: Optional[Dict[str, Any]] = None
-    failure: Optional[Dict[str, Any]] = None
+    exit: dict[str, Any] | None = None
+    failure: dict[str, Any] | None = None
 
     @property
     def changed(self) -> bool:
@@ -171,9 +169,9 @@ class Outcome:
         return (self.exit or self.failure)["msg"]
 
 
-def run_module(files_data: Optional[Dict[str, Any]], *, src: str = "/apps/app",
+def run_module(files_data: dict[str, Any] | None, *, src: str = "/apps/app",
                state: str = "installed", force: bool = False, systemctl_timeout: int = 120,
-               settle_time: int = 0, name: Optional[str] = None,
+               settle_time: int = 0, name: str | None = None,
                control_node_processed: bool = True) -> Outcome:
     """
     Run the real module with these parameters and report how it ended.
@@ -202,8 +200,8 @@ def run_module(files_data: Optional[Dict[str, Any]], *, src: str = "/apps/app",
     raise AssertionError("the module returned without calling exit_json or fail_json")
 
 
-def deploy_fresh(monkeypatch, files_data: Dict[str, Any], app_name: str, *,
-                 systemd: Optional[FakeSystemd] = None, **params) -> Deployment:
+def deploy_fresh(monkeypatch, files_data: dict[str, Any], app_name: str, *,
+                 systemd: FakeSystemd | None = None, **params) -> Deployment:
     """
     Stage B: run the module as if on a host that has never seen this app.
 

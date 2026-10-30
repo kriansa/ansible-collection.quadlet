@@ -10,8 +10,6 @@ Options:
   --vm-attach=PORT    use a VM already listening for ssh on PORT instead of booting one
 """
 
-from __future__ import annotations
-
 import os
 import shutil
 from pathlib import Path

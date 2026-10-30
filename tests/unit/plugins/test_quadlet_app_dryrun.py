@@ -43,7 +43,7 @@ def dryrun(*unit_dirs: Path) -> subprocess.CompletedProcess:
 
 def generated_units(stdout: str) -> list:
     """The unit names in dryrun output, which prints each as a ---name--- header."""
-    return re.findall(r"^---(.+)---$", stdout, re.M)
+    return re.findall(r"^---(.+)---$", stdout, re.MULTILINE)
 
 
 @pytest.mark.parametrize("app", APPS, ids=[app.id for app in APPS])

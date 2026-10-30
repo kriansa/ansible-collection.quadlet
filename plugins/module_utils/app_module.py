@@ -49,8 +49,8 @@ class QuadletAppModule:
             self._deploy()
         except QuadletAppError as e:
             self.module.fail_json(msg=e.msg, **e.details)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            self.module.fail_json(msg=f"Unexpected error: {str(e)}")
+        except Exception as e:  # noqa: BLE001
+            self.module.fail_json(msg=f"Unexpected error: {e!s}")
 
     def _deploy(self) -> None:
         app = self._source().load(self.app_name)

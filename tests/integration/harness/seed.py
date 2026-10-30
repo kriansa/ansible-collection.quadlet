@@ -1,17 +1,14 @@
 """SSH keys and the cloud-init seed that lets the harness log into a fresh VM."""
 
-from __future__ import annotations
-
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Tuple
 
 # The account the harness logs in as; it can sudo without a password
 USER = "qa"
 
 
-def ensure_ssh_key(directory: Path) -> Tuple[Path, str]:
+def ensure_ssh_key(directory: Path) -> tuple[Path, str]:
     """
     Return (private key path, public key text), generating the pair the first time.
 

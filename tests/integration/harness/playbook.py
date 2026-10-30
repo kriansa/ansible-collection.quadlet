@@ -6,8 +6,6 @@ of the collection is visible, `passwordstore` is the test stub, and nothing from
 Ansible configuration applies.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import subprocess
@@ -15,7 +13,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -30,7 +28,7 @@ class TaskResult:
     task: str
     action: str
     status: str
-    result: Dict[str, Any]
+    result: dict[str, Any]
 
     @property
     def changed(self) -> bool:
@@ -51,7 +49,7 @@ class PlaybookRun:
 
     returncode: int
     output: str
-    tasks: List[TaskResult] = field(default_factory=list)
+    tasks: list[TaskResult] = field(default_factory=list)
 
     def task(self, name: str) -> TaskResult:
         matches = [t for t in self.tasks if t.task == name]
@@ -71,9 +69,9 @@ class PlaybookRunner:
         self.workdir = workdir
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.ansible_home = Path(tempfile.mkdtemp(prefix="ansible-home-", dir=self.workdir))
-        self.history: List[PlaybookRun] = []
+        self.history: list[PlaybookRun] = []
 
-    def environment(self, capture_file: Path) -> Dict[str, str]:
+    def environment(self, capture_file: Path) -> dict[str, str]:
         env = {key: value for key, value in os.environ.items() if not key.startswith("ANSIBLE_")}
         env.update(
             {
@@ -92,7 +90,7 @@ class PlaybookRunner:
         )
         return env
 
-    def run(self, playbook: Path, *, extra_args: Optional[List[str]] = None,
+    def run(self, playbook: Path, *, extra_args: list[str] | None = None,
             timeout: float = 900) -> PlaybookRun:
         """Run a playbook file and collect its results."""
         capture = Path(tempfile.mkstemp(prefix="results-", suffix=".jsonl", dir=self.workdir)[1])
@@ -108,7 +106,7 @@ class PlaybookRunner:
         self.history.append(run)
         return run
 
-    def run_plays(self, plays: List[Dict[str, Any]], directory: Path, *, name: str = "step",
+    def run_plays(self, plays: list[dict[str, Any]], directory: Path, *, name: str = "step",
                   **kwargs) -> PlaybookRun:
         """Write plays to a playbook file in `directory` and run it."""
         directory.mkdir(parents=True, exist_ok=True)

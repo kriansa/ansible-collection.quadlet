@@ -6,13 +6,10 @@ sleeps: systemd logs a message with a fixed id each time a unit starts or stops,
 those after a cursor is exact.
 """
 
-from __future__ import annotations
-
 import json
 import shlex
 import subprocess
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
 
@@ -59,7 +56,7 @@ class Host:
 
     # --- units -------------------------------------------------------------------------------
 
-    def unit(self, name: str, *properties: str) -> Dict[str, str]:
+    def unit(self, name: str, *properties: str) -> dict[str, str]:
         """Selected `systemctl show` properties of a unit."""
         args = " ".join(f"-p {shlex.quote(p)}" for p in properties)
         lines = self.output(f"systemctl show {args} {shlex.quote(name)}").splitlines()
@@ -85,7 +82,7 @@ class Host:
         out = self.output("journalctl --quiet -n 0 --show-cursor")
         return out.rsplit("-- cursor: ", 1)[1].strip()
 
-    def _events(self, message_id: str, unit: str, since: str) -> List[dict]:
+    def _events(self, message_id: str, unit: str, since: str) -> list[dict]:
         out = self.output(
             f"journalctl --quiet -o json --after-cursor={shlex.quote(since)} "
             f"MESSAGE_ID={message_id} UNIT={shlex.quote(unit)}",
@@ -100,7 +97,7 @@ class Host:
     def stops(self, unit: str, since: str) -> int:
         return len(self._events(UNIT_STOPPED, unit, since))
 
-    def journal(self, since: str, unit: Optional[str] = None) -> str:
+    def journal(self, since: str, unit: str | None = None) -> str:
         unit_filter = f"-u {shlex.quote(unit)}" if unit else ""
         return self.output(f"journalctl --quiet --no-pager -o short-precise "
                            f"--after-cursor={shlex.quote(since)} {unit_filter}", check=False)
@@ -124,7 +121,7 @@ class Host:
         owner, mode, context = self.output(f"stat -c '%u:%g %a %C' {shlex.quote(path)}").split(" ")
         return FileInfo(owner, mode, context)
 
-    def listdir(self, path: str) -> List[str]:
+    def listdir(self, path: str) -> list[str]:
         out = self.output(f"ls -A {shlex.quote(path)}", check=False)
         return sorted(out.splitlines()) if out else []
 
@@ -139,7 +136,7 @@ class Host:
     def container_exec(self, container: str, command: str, **kwargs) -> subprocess.CompletedProcess:
         return self.run(f"podman exec {shlex.quote(container)} sh -c {shlex.quote(command)}", **kwargs)
 
-    def uid_map(self, container: str) -> List[List[int]]:
+    def uid_map(self, container: str) -> list[list[int]]:
         """The container's uid map: [inside, outside, count] per line."""
         pid = self.inspect(container)["State"]["Pid"]
         return [[int(n) for n in line.split()] for line in self.output(f"cat /proc/{pid}/uid_map").splitlines()]

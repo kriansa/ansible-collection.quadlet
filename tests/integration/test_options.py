@@ -4,7 +4,11 @@ import time
 
 import pytest
 
-from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import DEPLOY_TASK, IDLE, IMAGE
+from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import (
+    DEPLOY_TASK,
+    IDLE,
+    IMAGE,
+)
 
 pytestmark = pytest.mark.integration
 
