@@ -16,7 +16,7 @@ List this repository in your `requirements.yml`:
 collections:
   - name: https://github.com/kriansa/ansible-collection.quadlet
     type: git
-    version: master
+    version: main
 ```
 
 Then install it:
