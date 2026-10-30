@@ -72,9 +72,17 @@ def test_async_is_rejected(make_app, host):
     app = make_app("async")
     app.write("quadlets/main.container", main())
     play = {
-        "hosts": "testhost", "gather_facts": False, "become": True,
-        "tasks": [{"name": DEPLOY_TASK, "async": 60, "poll": 5,
-                   "kriansa.quadlet.quadlet_app": {"src": f"apps/{app.name}"}}],
+        "hosts": "testhost",
+        "gather_facts": False,
+        "become": True,
+        "tasks": [
+            {
+                "name": DEPLOY_TASK,
+                "async": 60,
+                "poll": 5,
+                "kriansa.quadlet.quadlet_app": {"src": f"apps/{app.name}"},
+            }
+        ],
     }
 
     run = app.runner.run_plays([play], app.playbook_dir, name="async")
@@ -88,9 +96,16 @@ def test_loop_over_several_apps(make_app, host):
     for app in (first, second):
         app.write("quadlets/main.container", main())
     play = {
-        "hosts": "testhost", "gather_facts": False, "become": True,
-        "tasks": [{"name": DEPLOY_TASK, "loop": [first.name, second.name],
-                   "kriansa.quadlet.quadlet_app": {"src": "apps/{{ item }}", "state": "started"}}],
+        "hosts": "testhost",
+        "gather_facts": False,
+        "become": True,
+        "tasks": [
+            {
+                "name": DEPLOY_TASK,
+                "loop": [first.name, second.name],
+                "kriansa.quadlet.quadlet_app": {"src": "apps/{{ item }}", "state": "started"},
+            }
+        ],
     }
 
     run = first.runner.run_plays([play], first.playbook_dir, name="loop")

@@ -107,8 +107,12 @@ class ActionModule(ActionBase):  # pylint: disable=too-few-public-methods
             directory and path - and contents holds the matching content at the same position
         """
         files, contents = [], []
-        for group, kind in (("quadlets", "quadlet"), ("units", "unit"), ("init", "init"),
-                            ("config", "config")):
+        for group, kind in (
+            ("quadlets", "quadlet"),
+            ("units", "unit"),
+            ("init", "init"),
+            ("config", "config"),
+        ):
             for entry in files_data[group]:
                 files.append({"kind": kind, **{k: v for k, v in entry.items() if k != "content"}})
                 contents.append(entry["content"])

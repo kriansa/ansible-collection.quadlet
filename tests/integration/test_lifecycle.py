@@ -15,9 +15,11 @@ DATA = "[Volume]\n"
 def full_app(make_app, tag):
     """main + db on a shared network, main mounting a volume and requiring db."""
     app = make_app(tag)
-    app.write("quadlets/main.container",
-              f"[Unit]\nRequires=db.service\nAfter=db.service\n\n[Container]\n{IMAGE}\n{IDLE}\n"
-              "Network=main.network\nVolume=data.volume:/data\n")
+    app.write(
+        "quadlets/main.container",
+        f"[Unit]\nRequires=db.service\nAfter=db.service\n\n[Container]\n{IMAGE}\n{IDLE}\n"
+        "Network=main.network\nVolume=data.volume:/data\n",
+    )
     app.write("quadlets/db.container", DB + "Network=main.network\n")
     app.write("quadlets/main.network", NETWORK)
     app.write("quadlets/data.volume", DATA)
@@ -39,7 +41,8 @@ def test_installed_on_a_fresh_host(make_app, host):
     assert "UserNS=auto:size=65536" in content
     assert "RequiresMountsFor=/var/lib/containers/storage" in content
     assert host.unit(app.service("main"), "LoadState", "ActiveState") == {
-        "LoadState": "loaded", "ActiveState": "inactive",
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
     }
     assert step.starts(app.service("main")) == 0
 
@@ -69,7 +72,7 @@ def test_started_on_a_fresh_host(make_app, host):
     assert step.starts(app.service("main")) == 1
     assert step.starts(app.service("db")) == 1
     # The ownership bootstrap ran and left its marker
-    assert host.listdir("/var/lib/quadlet-app") .count(f"{app.name}--data.0_0.done") == 1
+    assert host.listdir("/var/lib/quadlet-app").count(f"{app.name}--data.0_0.done") == 1
 
     again = app.deploy("started")
     assert not again.changed
@@ -143,9 +146,11 @@ def test_installed_while_running_does_not_restart(make_app, host):
 def test_directives_written_with_spaces_around_equals(make_app, host):
     """systemd reads `Key = value` like `Key=value`, and so must every rule of the module."""
     app = make_app("spaced")
-    app.write("quadlets/main.container",
-              f"[Container]\n{IMAGE}\n{IDLE}\nNetwork = app.network\nVolume = data.volume:/data\n"
-              "UserNS = host\n")
+    app.write(
+        "quadlets/main.container",
+        f"[Container]\n{IMAGE}\n{IDLE}\nNetwork = app.network\nVolume = data.volume:/data\n"
+        "UserNS = host\n",
+    )
     app.write("quadlets/app.network", "[Network]\n")
     app.write("quadlets/data.volume", "[Volume]\nX-Owner = 10:10\n")
     mountpoint = host.seed_volume(f"{app.name}--data")
@@ -161,9 +166,11 @@ def test_directives_written_with_spaces_around_equals(make_app, host):
 def test_only_names_the_app_defines_are_prefixed(make_app, host):
     """sshd.service is the host's, and stays as written; db.service is the app's."""
     app = make_app("hostunit")
-    app.write("quadlets/main.container",
-              "[Unit]\nWants=sshd.service db.service\nAfter=sshd.service db.service\n\n"
-              f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network:ip=198.51.100.10\n")
+    app.write(
+        "quadlets/main.container",
+        "[Unit]\nWants=sshd.service db.service\nAfter=sshd.service db.service\n\n"
+        f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network:ip=198.51.100.10\n",
+    )
     app.write("quadlets/db.container", f"[Container]\n{IMAGE}\n{IDLE}\n")
     app.write("quadlets/app.network", "[Network]\nSubnet=198.51.100.0/24\n")
 
@@ -180,8 +187,10 @@ def test_only_names_the_app_defines_are_prefixed(make_app, host):
 
 def test_file_with_windows_line_endings(make_app, host):
     app = make_app("crlf")
-    content = (f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network\nVolume=data.volume:/data\n"
-               "Volume=%config%:/etc/app\n")
+    content = (
+        f"[Container]\n{IMAGE}\n{IDLE}\nNetwork=app.network\nVolume=data.volume:/data\n"
+        "Volume=%config%:/etc/app\n"
+    )
     app.write_bytes("quadlets/main.container", content.replace("\n", "\r\n").encode())
     app.write("quadlets/app.network", "[Network]\n")
     app.write("quadlets/data.volume", "[Volume]\n")
@@ -195,14 +204,19 @@ def test_file_with_windows_line_endings(make_app, host):
     assert f"{app.name}--app" in container["NetworkSettings"]["Networks"]
     mount = next(m for m in container["Mounts"] if m["Destination"] == "/data")
     assert mount["Name"] == f"{app.name}--data"
-    assert "idmap" in host.container_exec(app.container("main"),
-                                          "grep ' /data ' /proc/self/mountinfo").stdout
+    assert (
+        "idmap"
+        in host.container_exec(app.container("main"), "grep ' /data ' /proc/self/mountinfo").stdout
+    )
 
 
 def test_comments_above_the_first_header_are_kept(make_app, host):
     app = make_app("comments")
-    app.write("quadlets/main.container", f"# What the app is for\n\n# The main container\n"
-                                         f"[Container]\n{IMAGE}\n{IDLE}\nVolume=data.volume:/data\n")
+    app.write(
+        "quadlets/main.container",
+        f"# What the app is for\n\n# The main container\n"
+        f"[Container]\n{IMAGE}\n{IDLE}\nVolume=data.volume:/data\n",
+    )
     app.write("quadlets/data.volume", "# Owned by root\n[Volume]\n")
 
     step = app.deploy("started")

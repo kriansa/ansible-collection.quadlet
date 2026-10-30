@@ -25,8 +25,15 @@ STORAGE = "RequiresMountsFor=/var/lib/containers/storage"
 APP_FILES = {
     name: ""
     for name in [
-        "main.container", "db.container", "backup.container", "job.container", "x.kube",
-        "main.network", "backend.pod", "data.volume", "x.timer",
+        "main.container",
+        "db.container",
+        "backup.container",
+        "job.container",
+        "x.kube",
+        "main.network",
+        "backend.pod",
+        "data.volume",
+        "x.timer",
     ]
 }
 

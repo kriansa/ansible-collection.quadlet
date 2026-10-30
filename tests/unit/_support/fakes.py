@@ -137,11 +137,15 @@ class FakeSystemd:
                 state = self.scripted_states[unit].pop(0)
             else:
                 state = "active" if unit in self.active else "inactive"
-            return subprocess.CompletedProcess(argv, 0 if state == "active" else 3, state + "\n", "")
+            return subprocess.CompletedProcess(
+                argv, 0 if state == "active" else 3, state + "\n", ""
+            )
         if verb == "is-enabled":
             unit = args[1]
             state = "enabled" if unit in self.enabled else "disabled"
-            return subprocess.CompletedProcess(argv, 0 if state == "enabled" else 1, state + "\n", "")
+            return subprocess.CompletedProcess(
+                argv, 0 if state == "enabled" else 1, state + "\n", ""
+            )
         if verb == "list-dependencies":
             main = args[-1]
             lines = [main] + [f"  {dep}" for dep in self.dependencies.get(main, [])]
@@ -178,13 +182,15 @@ class FakeSystemd:
         else:
             state, substate = "inactive", "dead"
         count = self.invocations.get(unit, 0)
-        return "\n".join([
-            f"Id={unit}",
-            f"Type={self.types.get(unit, 'notify')}",
-            f"ActiveState={state}",
-            f"SubState={substate}",
-            f"InvocationID={f'invocation-{count}' if count else ''}",
-        ])
+        return "\n".join(
+            [
+                f"Id={unit}",
+                f"Type={self.types.get(unit, 'notify')}",
+                f"ActiveState={state}",
+                f"SubState={substate}",
+                f"InvocationID={f'invocation-{count}' if count else ''}",
+            ]
+        )
 
     def _sleep(self, seconds: float):
         self.sleeps.append(seconds)
@@ -222,8 +228,10 @@ class FakeSystemd:
         whole command for anything else.
         """
         return [
-            " ".join(call.systemctl) if call.systemctl is not None
-            else "generator" if call.argv[0] == GENERATOR
+            " ".join(call.systemctl)
+            if call.systemctl is not None
+            else "generator"
+            if call.argv[0] == GENERATOR
             else " ".join(call.argv)
             for call in self.calls
         ]
@@ -267,8 +275,11 @@ def run_bootstrap_unit(text: str) -> bool:
         argv = shlex.split(line.split("=", 1)[1])
         if argv[:2] == ["/usr/bin/mkdir", "-p"] and len(argv) == 3:
             os.makedirs(argv[2], exist_ok=True)
-        elif (argv[0] == "/usr/bin/find" and argv[2:5] == ["-maxdepth", "1", "-regex"]
-              and argv[6:] == ["-delete"]):
+        elif (
+            argv[0] == "/usr/bin/find"
+            and argv[2:5] == ["-maxdepth", "1", "-regex"]
+            and argv[6:] == ["-delete"]
+        ):
             # find matches its -regex against the whole path it prints, directory included
             for entry in os.listdir(argv[1]):
                 path = os.path.join(argv[1], entry)

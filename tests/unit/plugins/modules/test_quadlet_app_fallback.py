@@ -68,11 +68,15 @@ class TestChecksOnlyThisPathMakes:
     def test_orphan_config_directory(self, tmp_path, fake_host, systemd):
         app_dir = write_app(tmp_path / "app", QUADLETS, config={"nomatch": {"f": "x"}})
         outcome = run_module(None, src=str(app_dir), control_node_processed=False)
-        assert outcome.failure["msg"].startswith("No corresponding quadlet file for config/nomatch.")
+        assert outcome.failure["msg"].startswith(
+            "No corresponding quadlet file for config/nomatch."
+        )
 
     def test_orphan_config_directory_through_the_action_plugin_path(self, fake_host, systemd):
         # Pinned: deployed to /srv/app/config/nomatch/
-        outcome = run_module(make_files_data(QUADLETS, config={"nomatch": {"f": "x"}}), state="installed")
+        outcome = run_module(
+            make_files_data(QUADLETS, config={"nomatch": {"f": "x"}}), state="installed"
+        )
         assert outcome.changed
         assert fake_host.files()["srv/app/config/nomatch/f"] == "x"
 
@@ -124,5 +128,7 @@ class TestReadingFiles:
     @pytest.mark.parametrize("name", ["MyApp", "my-app"])
     def test_name_from_the_directory(self, tmp_path, fake_host, systemd, name):
         app_dir = write_app(tmp_path / name, QUADLETS)
-        outcome = run_module(None, src=str(app_dir), state="installed", control_node_processed=False)
+        outcome = run_module(
+            None, src=str(app_dir), state="installed", control_node_processed=False
+        )
         assert outcome.exit["application_name"] == name.lower()

@@ -21,7 +21,9 @@ IMAGE_URLS = (
     f"https://vault.almalinux.org/10.2/cloud/x86_64/images/{IMAGE}",
 )
 
-CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "kriansa-quadlet-tests" / "vm"
+CACHE_DIR = (
+    Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "kriansa-quadlet-tests" / "vm"
+)
 
 
 def sha256_of(path: Path) -> str:
@@ -53,7 +55,10 @@ def ensure_base_image() -> Path:
         errors = []
         for url in IMAGE_URLS:
             try:
-                with urllib.request.urlopen(url, timeout=60) as response, open(partial, "wb") as out:
+                with (
+                    urllib.request.urlopen(url, timeout=60) as response,
+                    open(partial, "wb") as out,
+                ):
                     shutil.copyfileobj(response, out, length=1 << 20)
                 break
             except OSError as e:

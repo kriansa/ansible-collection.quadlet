@@ -41,8 +41,12 @@ def to_module_args(files_data: dict[str, Any] | None) -> dict[str, Any]:
     files, contents = [], []
     for group in FILE_KINDS:
         for entry in files_data.get(group, []):
-            files.append({"kind": KIND_OF_GROUP[group],
-                          **{key: value for key, value in entry.items() if key != "content"}})
+            files.append(
+                {
+                    "kind": KIND_OF_GROUP[group],
+                    **{key: value for key, value in entry.items() if key != "content"},
+                }
+            )
             contents.append(entry["content"])
     return {"_files": files, "_contents": contents}
 
@@ -118,16 +122,16 @@ class Deployment:
         return {
             "exit": self.exit,
             "failure": self.failure,
-            "calls": [
-                {"argv": call.argv, "timeout": call.timeout} for call in self.systemd.calls
-            ],
+            "calls": [{"argv": call.argv, "timeout": call.timeout} for call in self.systemd.calls],
         }
 
 
-def make_files_data(quadlets: dict[str, str] | None = None,
-                    units: dict[str, str] | None = None,
-                    init: dict[str, dict[str, str]] | None = None,
-                    config: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
+def make_files_data(
+    quadlets: dict[str, str] | None = None,
+    units: dict[str, str] | None = None,
+    init: dict[str, dict[str, str]] | None = None,
+    config: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """
     Build the `_files_data` the action plugin would send.
 
@@ -137,6 +141,7 @@ def make_files_data(quadlets: dict[str, str] | None = None,
         init: container directory -> {relative path -> content}
         config: same as init
     """
+
     def nested(tree):
         return [
             {"container": container, "path": path, "content": content}
@@ -169,10 +174,17 @@ class Outcome:
         return (self.exit or self.failure)["msg"]
 
 
-def run_module(files_data: dict[str, Any] | None, *, src: str = "/apps/app",
-               state: str = "installed", force: bool = False, systemctl_timeout: int = 120,
-               settle_time: int = 0, name: str | None = None,
-               control_node_processed: bool = True) -> Outcome:
+def run_module(
+    files_data: dict[str, Any] | None,
+    *,
+    src: str = "/apps/app",
+    state: str = "installed",
+    force: bool = False,
+    systemctl_timeout: int = 120,
+    settle_time: int = 0,
+    name: str | None = None,
+    control_node_processed: bool = True,
+) -> Outcome:
     """
     Run the real module with these parameters and report how it ended.
 
@@ -200,8 +212,14 @@ def run_module(files_data: dict[str, Any] | None, *, src: str = "/apps/app",
     raise AssertionError("the module returned without calling exit_json or fail_json")
 
 
-def deploy_fresh(monkeypatch, files_data: dict[str, Any], app_name: str, *,
-                 systemd: FakeSystemd | None = None, **params) -> Deployment:
+def deploy_fresh(
+    monkeypatch,
+    files_data: dict[str, Any],
+    app_name: str,
+    *,
+    systemd: FakeSystemd | None = None,
+    **params,
+) -> Deployment:
     """
     Stage B: run the module as if on a host that has never seen this app.
 

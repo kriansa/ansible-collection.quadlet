@@ -18,26 +18,32 @@ MAIN = "[Container]\nImage=alpine\n"
 
 def install(monkeypatch, run):
     """Replace subprocess.run, wherever the module starts a process, with a function."""
-    install_processes(monkeypatch, SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    install_processes(
+        monkeypatch, SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired)
+    )
 
 
 def returning(returncode=0, stdout="", stderr=""):
     def run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
     return run
 
 
 def raising(exc):
     def run(argv, **kwargs):
         raise exc
+
     return run
 
 
 def recording(seen):
     """A run that succeeds, noting each command and its timeout."""
+
     def run(argv, **kwargs):
         seen.append((argv, kwargs["timeout"]))
         return subprocess.CompletedProcess(argv, 0, "", "")
+
     return run
 
 
@@ -100,7 +106,17 @@ class TestDependencies:
         install(monkeypatch, recording(seen))
         Systemd(120).dependencies("app--main.service", "app--")
         assert seen == [
-            (["systemctl", "list-dependencies", "--all", "--type", "service", "app--main.service"], 10)
+            (
+                [
+                    "systemctl",
+                    "list-dependencies",
+                    "--all",
+                    "--type",
+                    "service",
+                    "app--main.service",
+                ],
+                10,
+            )
         ]
 
     def test_failure_means_no_dependencies(self, monkeypatch):
@@ -154,7 +170,9 @@ class TestStateQueries:
         install(monkeypatch, raising(subprocess.TimeoutExpired("systemctl", 10)))
         assert getattr(Systemd(120), query)("x") is False
 
-    @pytest.mark.parametrize("query, verb", [("is_active", "is-active"), ("is_enabled", "is-enabled")])
+    @pytest.mark.parametrize(
+        "query, verb", [("is_active", "is-active"), ("is_enabled", "is-enabled")]
+    )
     def test_queries_are_bounded(self, monkeypatch, query, verb):
         seen = []
         install(monkeypatch, recording(seen))

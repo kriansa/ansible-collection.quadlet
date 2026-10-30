@@ -30,7 +30,9 @@ def test_joining_another_apps_network(make_app, host):
 
     networks = host.inspect(web.container("main"))["NetworkSettings"]["Networks"]
     assert f"{owner.name}--main" in networks
-    lookup = host.container_exec(web.container("main"), f"nslookup {owner.container('main')}", check=False)
+    lookup = host.container_exec(
+        web.container("main"), f"nslookup {owner.container('main')}", check=False
+    )
     assert lookup.returncode == 0, lookup.stdout + lookup.stderr
 
 
@@ -46,7 +48,7 @@ def test_joining_before_the_network_exists(make_app, host):
 
 
 def test_joining_by_the_other_apps_quadlet_name(make_app, host):
-    """"<other>--main.network" is not a file of this app, so it is left as written."""
+    """ "<other>--main.network" is not a file of this app, so it is left as written."""
     owner = network_owner(make_app)
     owner.deploy("started")
     web = joiner(make_app, owner, network_line=f"Network={owner.name}--main.network")

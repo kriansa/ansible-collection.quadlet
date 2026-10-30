@@ -41,7 +41,9 @@ class TestOwnership:
         assert f"{app.name}--data.0_0.done" in host.listdir(STATE_DIR)
 
     def test_declared_owner_lets_a_non_root_image_write(self, make_app, host):
-        app, mountpoint = volume_app(make_app, host, "nonroot", owner="10000:10000", user="10000:10000")
+        app, mountpoint = volume_app(
+            make_app, host, "nonroot", owner="10000:10000", user="10000:10000"
+        )
         app.deploy("started")
 
         written = host.container_exec(app.container("main"), "touch /data/written && id -u")
@@ -81,16 +83,21 @@ class TestOwnership:
         app.deploy("started")
         host.run(f"chown -R 0:0 {mountpoint}")
 
-        host.run(f"rm {STATE_DIR}/{app.name}--data.5_5.done && "
-                 f"systemctl restart {app.service('data-volume-init')}")
+        host.run(
+            f"rm {STATE_DIR}/{app.name}--data.5_5.done && "
+            f"systemctl restart {app.service('data-volume-init')}"
+        )
 
         assert host.stat(f"{mountpoint}/seed").owner == "5:5"
         assert f"{app.name}--data.5_5.done" in host.listdir(STATE_DIR)
 
-    @pytest.mark.parametrize("value, message", [
-        ("abc", "Invalid X-Owner in data.volume: 'abc'."),
-        ("70000:0", "X-Owner in data.volume is out of range: '70000:0'."),
-    ])
+    @pytest.mark.parametrize(
+        "value, message",
+        [
+            ("abc", "Invalid X-Owner in data.volume: 'abc'."),
+            ("70000:0", "X-Owner in data.volume is out of range: '70000:0'."),
+        ],
+    )
     def test_invalid_owner_deploys_nothing(self, make_app, host, value, message):
         app = volume_app(make_app, host, "badowner", owner=value, seed=False)[0]
 
@@ -170,7 +177,10 @@ class TestOwnership:
         """Pinned: nothing is ever removed from the host."""
         app = volume_app(make_app, host, "removedvol", owner="7:7")[0]
         app.write("quadlets/cache.volume", "[Volume]\n")
-        app.write("quadlets/main.container", container("Volume=data.volume:/data\nVolume=cache.volume:/cache\n"))
+        app.write(
+            "quadlets/main.container",
+            container("Volume=data.volume:/data\nVolume=cache.volume:/cache\n"),
+        )
         app.deploy("started")
 
         app.delete("quadlets/cache.volume")
@@ -198,8 +208,10 @@ class TestUserNamespaces:
         assert self.mapped_ids(uid_map) == 65536
         assert min(outside for _inside, outside, _count in uid_map) >= 1000000
         pid = host.inspect(app.container("main"))["State"]["Pid"]
-        gid_map = [[int(n) for n in line.split()]
-                   for line in host.output(f"cat /proc/{pid}/gid_map").splitlines()]
+        gid_map = [
+            [int(n) for n in line.split()]
+            for line in host.output(f"cat /proc/{pid}/gid_map").splitlines()
+        ]
         assert self.mapped_ids(gid_map) == 65536
 
     def test_host(self, make_app, host):
@@ -226,8 +238,11 @@ class TestMarkers:
     def test_owner_change_replaces_only_that_volumes_marker(self, make_app, host):
         app = volume_app(make_app, host, "markers", owner="1:1")[0]
         app.deploy("started")
-        others = [f"{app.name}--data2.9_9.done", f"{app.name}--data.v2.9_9.done",
-                  "qaother--data.1_1.done"]
+        others = [
+            f"{app.name}--data2.9_9.done",
+            f"{app.name}--data.v2.9_9.done",
+            "qaother--data.1_1.done",
+        ]
         host.run(" && ".join(f"touch {STATE_DIR}/{name}" for name in others))
 
         app.write("quadlets/data.volume", "[Volume]\nX-Owner=2:2\n")
@@ -246,7 +261,9 @@ class TestMarkers:
         stale = f"{STATE_DIR}/{app.name}--data.5_5.done"
         host.run(f"touch {stale}")
 
-        app.write("quadlets/main.container", container("Volume=data.volume:/data\nEnvironment=X=1\n"))
+        app.write(
+            "quadlets/main.container", container("Volume=data.volume:/data\nEnvironment=X=1\n")
+        )
         app.deploy("started")
         app.deploy("started", args={"force": True})
         assert host.exists(stale)

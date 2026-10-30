@@ -39,10 +39,6 @@ source_pkgs = ["ansible_collections.kriansa.quadlet.plugins"]
 [tool.coverage.paths]
 plugins = ["plugins/", "*/ansible_collections/kriansa/quadlet/plugins/"]
 
-[tool.black]
-line-length = 100
-extend-exclude = "tests/fixtures/"
-
 [tool.ruff]
 line-length = 100
 extend-exclude = ["tests/fixtures"]

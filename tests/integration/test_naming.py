@@ -23,6 +23,7 @@ def test_name_argument_is_lowercased(make_app, host):
         from ansible_collections.kriansa.quadlet.tests.integration.harness.apps import (
             remove_from_host,
         )
+
         remove_from_host(host, custom.lower())
 
 
@@ -36,7 +37,9 @@ def test_invalid_names_deploy_nothing(make_app, host, name):
     assert step.failed
     assert step.msg.startswith(f"Invalid application name: {name.lower()}.")
     assert host.listdir("/etc/containers/systemd") == [
-        entry for entry in host.listdir("/etc/containers/systemd") if not entry.startswith(name.lower())
+        entry
+        for entry in host.listdir("/etc/containers/systemd")
+        if not entry.startswith(name.lower())
     ]
 
 

@@ -92,7 +92,10 @@ def check_json(request, path: Path, actual) -> None:
         return
     if not path.is_file():
         pytest.fail(f"no golden at {path.relative_to(REPO_ROOT)}; run with --update-goldens")
-    problems = _describe({path.name: path.read_text(encoding="utf-8")}, {path.name: rendered},
-                         path.parent.relative_to(GOLDEN_DIR).as_posix())
+    problems = _describe(
+        {path.name: path.read_text(encoding="utf-8")},
+        {path.name: rendered},
+        path.parent.relative_to(GOLDEN_DIR).as_posix(),
+    )
     if problems:
         pytest.fail("\n".join(problems), pytrace=False)

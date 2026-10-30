@@ -110,8 +110,10 @@ class TestFreshHost:
 
     def test_files_are_written_with_their_contents(self, fake_host, systemd):
         run_module(
-            app(init={"main": {"seed.sql": "SELECT 1;\n"}},
-                config={"main": {"sub/app.conf": "x=1\n"}}),
+            app(
+                init={"main": {"seed.sql": "SELECT 1;\n"}},
+                config={"main": {"sub/app.conf": "x=1\n"}},
+            ),
             state="installed",
         )
         files = fake_host.files()
@@ -190,7 +192,9 @@ class TestUnchanged:
 class TestChanged:
     def test_started_and_running_restarts_the_app_once(self, deployed):
         deployed.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
-        outcome = run_module(app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="started")
+        outcome = run_module(
+            app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="started"
+        )
 
         assert outcome.changed
         assert deployed.state_changes == [
@@ -200,7 +204,9 @@ class TestChanged:
 
     def test_installed_while_running_does_not_restart(self, deployed):
         # Pinned: the new files are in place but the running containers keep the old ones
-        outcome = run_module(app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="installed")
+        outcome = run_module(
+            app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="installed"
+        )
         assert outcome.changed
         assert deployed.state_changes == [["daemon-reload"]]
 
@@ -233,8 +239,12 @@ class TestChanged:
 
         deployed.on_command = init_restart_takes_main_down
         run_module(
-            app(quadlets={"data.volume": "[Volume]\nX-Owner=2000:2000\n",
-                          "db.container": DB + "Environment=V=2\n"}),
+            app(
+                quadlets={
+                    "data.volume": "[Volume]\nX-Owner=2000:2000\n",
+                    "db.container": DB + "Environment=V=2\n",
+                }
+            ),
             state="started",
         )
         assert deployed.state_changes == [
@@ -348,8 +358,10 @@ class TestTimers:
         run_module(with_timer(), state="started")
         systemd.calls.clear()
         run_module(with_timer(quadlets={"db.container": DB + "Environment=V=2\n"}), state="started")
-        assert not any(change[0] == "restart" and "app--job.timer" in change
-                       for change in systemd.state_changes)
+        assert not any(
+            change[0] == "restart" and "app--job.timer" in change
+            for change in systemd.state_changes
+        )
 
     def test_timers_are_reconciled_in_sorted_order(self, fake_host, systemd):
         files = app(units={"b.timer": TIMER, "a.timer": TIMER})
@@ -358,8 +370,12 @@ class TestTimers:
         assert enables == ["app--a.timer", "app--b.timer"]
 
     def test_a_quadlet_can_name_a_timer_of_the_app(self, fake_host, systemd):
-        files = with_timer(quadlets={"main.container": "[Unit]\nAfter=sshd.service job.timer\n\n"
-                                                       "[Container]\nImage=alpine\n"})
+        files = with_timer(
+            quadlets={
+                "main.container": "[Unit]\nAfter=sshd.service job.timer\n\n"
+                "[Container]\nImage=alpine\n"
+            }
+        )
         run_module(files, state="installed")
         main = fake_host.files()["etc/containers/systemd/app--main.container"]
         assert "After=sshd.service app--job.timer\n" in main
@@ -414,11 +430,19 @@ def test_success_message_for_an_unknown_state(fake_host, systemd):
 def test_anything_else_that_goes_wrong_is_reported_as_unexpected(fake_host, systemd):
     # The action plugin only ever sends these four kinds of file; this is for anything that gets
     # past it
-    fake = FakeModule({
-        "src": "/apps/app", "name": None, "state": "installed", "force": False,
-        "systemctl_timeout": 120, "settle_time": 0, "_control_node_processed": True,
-        "_files": [{"kind": "bogus", "name": "x"}], "_contents": [""],
-    })
+    fake = FakeModule(
+        {
+            "src": "/apps/app",
+            "name": None,
+            "state": "installed",
+            "force": False,
+            "systemctl_timeout": 120,
+            "settle_time": 0,
+            "_control_node_processed": True,
+            "_files": [{"kind": "bogus", "name": "x"}],
+            "_contents": [""],
+        }
+    )
     with pytest.raises(AnsibleFailJson) as excinfo:
         quadlet_app.QuadletAppModule(fake).run()
     assert excinfo.value.result == {"msg": "Unexpected error: 'bogus'"}

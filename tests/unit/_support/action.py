@@ -26,11 +26,17 @@ class ActionRun:
     module_task_vars: dict[str, Any] | None
 
 
-def make_action(action_class, *, basedir: Path, args: dict[str, Any],
-                task_vars: dict[str, Any] | None = None,
-                task_level_vars: dict[str, Any] | None = None,
-                check_mode: bool = False, async_val: int = 0,
-                module_result: dict[str, Any] | None = None):
+def make_action(
+    action_class,
+    *,
+    basedir: Path,
+    args: dict[str, Any],
+    task_vars: dict[str, Any] | None = None,
+    task_level_vars: dict[str, Any] | None = None,
+    check_mode: bool = False,
+    async_val: int = 0,
+    module_result: dict[str, Any] | None = None,
+):
     """
     Build an action plugin instance wired to real Ansible objects.
 

@@ -18,7 +18,18 @@ def ensure_ssh_key(directory: Path) -> tuple[Path, str]:
     private = directory / "id_ed25519"
     if not private.exists():
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "kriansa-quadlet-tests", "-f", str(private)],
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                "kriansa-quadlet-tests",
+                "-f",
+                str(private),
+            ],
             check=True,
         )
     return private, (directory / "id_ed25519.pub").read_text().strip()
@@ -44,10 +55,24 @@ def build_seed(iso: Path, public_key: str, hostname: str = "qa-host") -> Path:
     with tempfile.TemporaryDirectory() as staging:
         staging_dir = Path(staging)
         (staging_dir / "user-data").write_text(user_data)
-        (staging_dir / "meta-data").write_text(f"instance-id: {hostname}\nlocal-hostname: {hostname}\n")
+        (staging_dir / "meta-data").write_text(
+            f"instance-id: {hostname}\nlocal-hostname: {hostname}\n"
+        )
         subprocess.run(
-            ["xorriso", "-as", "mkisofs", "-quiet", "-output", str(iso), "-volid", "cidata",
-             "-joliet", "-rock", "user-data", "meta-data"],
+            [
+                "xorriso",
+                "-as",
+                "mkisofs",
+                "-quiet",
+                "-output",
+                str(iso),
+                "-volid",
+                "cidata",
+                "-joliet",
+                "-rock",
+                "user-data",
+                "meta-data",
+            ],
             cwd=staging_dir,
             check=True,
             # xorriso prints a banner even with -quiet

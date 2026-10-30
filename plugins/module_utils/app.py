@@ -211,7 +211,7 @@ class QuadletApp:
             return directive
 
         body = directive.value.rstrip()
-        trailing = directive.value[len(body):]
+        trailing = directive.value[len(body) :]
         name, colon, rest = body.partition(":")
         if name not in self._file_names():
             return directive
@@ -243,7 +243,7 @@ class QuadletApp:
         # Trailing whitespace - such as the \r a file saved with Windows line endings leaves - stays
         # at the end of the line, rather than ending up inside the destination
         body = directive.value.rstrip()
-        trailing = directive.value[len(body):]
+        trailing = directive.value[len(body) :]
 
         # Volume=SOURCE:DEST[:OPTIONS]
         parts = body.split(":", 2)

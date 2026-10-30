@@ -53,8 +53,10 @@ def test_another_apps_broken_file_does_not_affect_this_deploy(make_app, host):
 
 def test_container_that_cannot_start(make_app, host):
     app = make_app("noimage")
-    app.write("quadlets/main.container",
-              "[Container]\nImage=docker.io/library/qa-does-not-exist:1\nPull=never\n")
+    app.write(
+        "quadlets/main.container",
+        "[Container]\nImage=docker.io/library/qa-does-not-exist:1\nPull=never\n",
+    )
 
     step = app.deploy("started")
 
@@ -70,22 +72,29 @@ def test_container_that_exits_at_once_fails_the_deploy(make_app, host):
     exits has already passed `systemctl start`. The settle check catches it, and shows its output.
     """
     app = make_app("exitone")
-    app.write("quadlets/main.container",
-              f"[Container]\n{IMAGE}\nExec=/bin/sh -c 'echo cannot open the database; exit 3'\n")
+    app.write(
+        "quadlets/main.container",
+        f"[Container]\n{IMAGE}\nExec=/bin/sh -c 'echo cannot open the database; exit 3'\n",
+    )
 
     step = app.deploy("started")
 
     assert step.failed
-    assert step.msg.startswith(f"{app.service('main')} did not stay running after it was started: "
-                               "it is failed. Its last log lines:\n"), step.msg
+    assert step.msg.startswith(
+        f"{app.service('main')} did not stay running after it was started: "
+        "it is failed. Its last log lines:\n"
+    ), step.msg
     assert "cannot open the database" in step.msg
 
 
 def test_dependency_in_a_crash_loop_fails_the_deploy(make_app, host):
     app = make_app("crashloop")
     app.write("quadlets/main.container", main() + "\n[Unit]\nWants=db.service\n")
-    app.write("quadlets/db.container", f"[Container]\n{IMAGE}\nExec=/bin/sh -c 'sleep 1; exit 1'\n"
-                                       "\n[Service]\nRestart=always\nRestartSec=1\n")
+    app.write(
+        "quadlets/db.container",
+        f"[Container]\n{IMAGE}\nExec=/bin/sh -c 'sleep 1; exit 1'\n"
+        "\n[Service]\nRestart=always\nRestartSec=1\n",
+    )
 
     step = app.deploy("started")
 
@@ -95,10 +104,14 @@ def test_dependency_in_a_crash_loop_fails_the_deploy(make_app, host):
 
 def test_oneshot_dependency_that_finished_does_not_fail_the_deploy(make_app, host):
     app = make_app("oneshotdep")
-    app.write("quadlets/main.container", main() + "\n[Unit]\nRequires=migrate.service\n"
-                                                  "After=migrate.service\n")
-    app.write("quadlets/migrate.container", f"[Container]\n{IMAGE}\nExec=/bin/true\n"
-                                            "\n[Service]\nType=oneshot\n")
+    app.write(
+        "quadlets/main.container",
+        main() + "\n[Unit]\nRequires=migrate.service\nAfter=migrate.service\n",
+    )
+    app.write(
+        "quadlets/migrate.container",
+        f"[Container]\n{IMAGE}\nExec=/bin/true\n\n[Service]\nType=oneshot\n",
+    )
 
     step = app.deploy("started")
 
@@ -117,7 +130,8 @@ def test_settle_time_zero_turns_the_check_off(make_app, host):
     while host.active_state(app.service("main")) != "failed" and time.monotonic() < deadline:
         time.sleep(1)
     assert host.unit(app.service("main"), "ActiveState", "Result") == {
-        "ActiveState": "failed", "Result": "exit-code",
+        "ActiveState": "failed",
+        "Result": "exit-code",
     }
 
 
@@ -132,10 +146,13 @@ def test_app_without_main_container(make_app, host):
     assert "not found" in started.msg
 
 
-@pytest.mark.parametrize("src, message", [
-    ("apps/does-not-exist", "Source directory not found on control node: "),
-    ("ansible.cfg", "Source path is not a directory: "),
-])
+@pytest.mark.parametrize(
+    "src, message",
+    [
+        ("apps/does-not-exist", "Source directory not found on control node: "),
+        ("ansible.cfg", "Source path is not a directory: "),
+    ],
+)
 def test_bad_src(make_app, host, src, message):
     app = make_app("badsrc")
     (app.playbook_dir / "ansible.cfg").write_text("")
@@ -149,8 +166,12 @@ def test_bad_src(make_app, host, src, message):
 
 def test_missing_src(make_app, host):
     app = make_app("nosrc")
-    play = {"hosts": "testhost", "gather_facts": False, "become": True,
-            "tasks": [{"name": "deploy the app", "kriansa.quadlet.quadlet_app": {"state": "started"}}]}
+    play = {
+        "hosts": "testhost",
+        "gather_facts": False,
+        "become": True,
+        "tasks": [{"name": "deploy the app", "kriansa.quadlet.quadlet_app": {"state": "started"}}],
+    }
 
     run = app.runner.run_plays([play], app.playbook_dir, name="nosrc")
 

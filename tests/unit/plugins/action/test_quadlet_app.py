@@ -61,8 +61,12 @@ MAIN = {"quadlets/main.container": "[Container]\nImage=alpine\n"}
 
 class TestRun:
     def test_module_call(self, playbook_dir):
-        run = deploy(playbook_dir, MAIN, args={"state": "started", "systemctl_timeout": 5},
-                     task_vars={"inventory_hostname": "h"})
+        run = deploy(
+            playbook_dir,
+            MAIN,
+            args={"state": "started", "systemctl_timeout": 5},
+            task_vars={"inventory_hostname": "h"},
+        )
         assert run.module_name == "kriansa.quadlet.quadlet_app"
         assert run.module_args == {
             "src": "myapp",
@@ -76,8 +80,12 @@ class TestRun:
 
     def test_module_gets_the_original_task_vars(self, playbook_dir):
         # Pinned: the task's own vars: block is only used for templating files
-        run = deploy(playbook_dir, MAIN, task_vars={"a": 1},
-                     task_level_vars={"b": trust_as_template("{{ a }}")})
+        run = deploy(
+            playbook_dir,
+            MAIN,
+            task_vars={"a": 1},
+            task_level_vars={"b": trust_as_template("{{ a }}")},
+        )
         assert run.module_task_vars == {"a": 1}
 
     def test_module_result_is_returned(self, playbook_dir):
@@ -116,7 +124,7 @@ class TestRun:
         assert run.result == {
             "failed": True,
             "msg": "Failed to process files on control node: "
-                   "x.timer is a systemd unit, not a quadlet. Move it to units/.",
+            "x.timer is a systemd unit, not a quadlet. Move it to units/.",
         }
         assert run.module_args is None
 
@@ -126,7 +134,9 @@ class TestRun:
 
     def test_async_is_rejected(self, playbook_dir):
         write(playbook_dir / "myapp", MAIN)
-        action = make_action(ActionModule, basedir=playbook_dir, args={"src": "myapp"}, async_val=10)[0]
+        action = make_action(
+            ActionModule, basedir=playbook_dir, args={"src": "myapp"}, async_val=10
+        )[0]
         with pytest.raises(AnsibleActionFail, match="does not support async"):
             action.run(task_vars={})
 
@@ -165,18 +175,25 @@ class TestName:
         assert rendered(run)["quadlets/main.container"] == "N=myapp\n"
 
     def test_from_name_argument_lowercased(self, playbook_dir):
-        run = deploy(playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
-                     args={"name": "Prod-DB"})
+        run = deploy(
+            playbook_dir,
+            {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
+            args={"name": "Prod-DB"},
+        )
         assert rendered(run)["quadlets/main.container"] == "N=prod-db\n"
 
     def test_from_src_with_a_trailing_slash(self, playbook_dir):
-        run = deploy(playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
-                     src="myapp/")
+        run = deploy(
+            playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"}, src="myapp/"
+        )
         assert rendered(run)["quadlets/main.container"] == "N=myapp\n"
 
     def test_name_beats_a_variable_of_the_same_name(self, playbook_dir):
-        run = deploy(playbook_dir, {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
-                     task_vars={"quadlet_app_name": "other"})
+        run = deploy(
+            playbook_dir,
+            {"quadlets/main.container": "N={{ quadlet_app_name }}\n"},
+            task_vars={"quadlet_app_name": "other"},
+        )
         assert rendered(run)["quadlets/main.container"] == "N=myapp\n"
 
 
@@ -185,21 +202,32 @@ class TestDiscovery:
         run = deploy(playbook_dir, MAIN)
         assert from_module_args(run.module_args) == {
             "quadlets": [{"name": "main.container", "content": "[Container]\nImage=alpine\n"}],
-            "units": [], "init": [], "config": [],
+            "units": [],
+            "init": [],
+            "config": [],
         }
 
     def test_quadlets_sorted_and_strays_skipped(self, playbook_dir):
-        files = {f"quadlets/{name}": "" for name in
-                 ["main.container", "a.network", "b.volume", "c.pod", "d.kube", "README.md"]}
+        files = {
+            f"quadlets/{name}": ""
+            for name in ["main.container", "a.network", "b.volume", "c.pod", "d.kube", "README.md"]
+        }
         files["quadlets/sub.container/x"] = ""
         run = deploy(playbook_dir, files)
         assert [f["name"] for f in from_module_args(run.module_args)["quadlets"]] == [
-            "a.network", "b.volume", "c.pod", "d.kube", "main.container"
+            "a.network",
+            "b.volume",
+            "c.pod",
+            "d.kube",
+            "main.container",
         ]
 
     def test_units_sorted(self, playbook_dir):
         run = deploy(playbook_dir, {**MAIN, "units/b.timer": "", "units/a.timer": ""})
-        assert [f["name"] for f in from_module_args(run.module_args)["units"]] == ["a.timer", "b.timer"]
+        assert [f["name"] for f in from_module_args(run.module_args)["units"]] == [
+            "a.timer",
+            "b.timer",
+        ]
 
     def test_stray_unit_is_rejected_with_the_modules_message(self, playbook_dir):
         run = deploy(playbook_dir, {**MAIN, "units/x.service": ""})
@@ -210,12 +238,20 @@ class TestDiscovery:
 
     @pytest.mark.parametrize("kind", ["init", "config"])
     def test_nested_files(self, playbook_dir, kind):
-        run = deploy(playbook_dir, {**MAIN, f"{kind}/README": "top level, ignored",
-                                    f"{kind}/main/a": "1", f"{kind}/main/sub/b": "2",
-                                    f"{kind}/main.container/c": "3"})
+        run = deploy(
+            playbook_dir,
+            {
+                **MAIN,
+                f"{kind}/README": "top level, ignored",
+                f"{kind}/main/a": "1",
+                f"{kind}/main/sub/b": "2",
+                f"{kind}/main.container/c": "3",
+            },
+        )
         entries = from_module_args(run.module_args)[kind]
         assert sorted((e["container"], e["path"], e["content"]) for e in entries) == [
-            ("main", "a", "1"), ("main", "sub/b", "2"),
+            ("main", "a", "1"),
+            ("main", "sub/b", "2"),
             # Raw directory name: the module strips the suffix later
             ("main.container", "c", "3"),
         ]
@@ -227,11 +263,15 @@ class TestTemplating:
         return rendered(run)["quadlets/main.container"]
 
     def test_variables(self, playbook_dir):
-        assert self.render_one(playbook_dir, "Image=x:{{ v }}\n", task_vars={"v": "1.2"}) == "Image=x:1.2\n"
+        assert (
+            self.render_one(playbook_dir, "Image=x:{{ v }}\n", task_vars={"v": "1.2"})
+            == "Image=x:1.2\n"
+        )
 
     def test_task_level_vars_win_and_are_templated(self, playbook_dir):
         out = self.render_one(
-            playbook_dir, "G={{ greeting }}\n",
+            playbook_dir,
+            "G={{ greeting }}\n",
             task_vars={"who": "bob", "greeting": "overridden"},
             task_level_vars={"greeting": trust_as_template("{{ who }} says hi")},
         )
@@ -239,12 +279,15 @@ class TestTemplating:
 
     def test_untrusted_task_level_vars_are_not_templated(self, playbook_dir):
         # Values written in a playbook are trusted; a plain string built in Python is not
-        out = self.render_one(playbook_dir, "G={{ g }}\n", task_vars={"n": 1},
-                              task_level_vars={"g": "{{ n }}"})
+        out = self.render_one(
+            playbook_dir, "G={{ g }}\n", task_vars={"n": 1}, task_level_vars={"g": "{{ n }}"}
+        )
         assert out == "G={{ n }}\n"
 
     def test_raw_comments_and_escaped_braces(self, playbook_dir):
-        out = self.render_one(playbook_dir, "{% raw %}{{ x }}{% endraw %}|{{ '{{' }}|{# gone #}end\n")
+        out = self.render_one(
+            playbook_dir, "{% raw %}{{ x }}{% endraw %}|{{ '{{' }}|{# gone #}end\n"
+        )
         assert out == "{{ x }}|{{|end\n"
 
     def test_block_tags_leave_no_blank_lines(self, playbook_dir):
@@ -280,12 +323,16 @@ class TestTemplating:
     def test_vault_encrypted_file(self, tmp_path):
         secret = [("default", VaultSecret(b"vault-password"))]
         playbook_dir = tmp_path / "pb"
-        write(playbook_dir / "myapp", {
-            **MAIN,
-            "config/main/secret.env": VaultLib(secret).encrypt("TOKEN={{ v }}\n"),
-        })
-        action, captured = make_action(ActionModule, basedir=playbook_dir, args={"src": "myapp"},
-                                       task_vars={"v": "abc"})
+        write(
+            playbook_dir / "myapp",
+            {
+                **MAIN,
+                "config/main/secret.env": VaultLib(secret).encrypt("TOKEN={{ v }}\n"),
+            },
+        )
+        action, captured = make_action(
+            ActionModule, basedir=playbook_dir, args={"src": "myapp"}, task_vars={"v": "abc"}
+        )
         action._loader.set_vault_secrets(secret)
         action.run(task_vars={"v": "abc"})
         assert from_module_args(captured["module_args"])["config"] == [
@@ -303,13 +350,16 @@ class TestTemplating:
         )
         assert run.module_args is None
 
-    @pytest.mark.parametrize("content, text", [
-        ("{{ n }}", "42"),
-        # Lost, as with Ansible's template module: the file renders to the number alone
-        ("{{ n }}\n", "42"),
-        ("{{ l }}", "[1, 2]"),
-        ("{{ none }}", ""),
-    ])
+    @pytest.mark.parametrize(
+        "content, text",
+        [
+            ("{{ n }}", "42"),
+            # Lost, as with Ansible's template module: the file renders to the number alone
+            ("{{ n }}\n", "42"),
+            ("{{ l }}", "[1, 2]"),
+            ("{{ none }}", ""),
+        ],
+    )
     def test_a_bare_expression_is_written_as_text(self, playbook_dir, content, text):
         # A file that is one expression renders to its value, which is turned into text the way
         # Ansible's template module does it

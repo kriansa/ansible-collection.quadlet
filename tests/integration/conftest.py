@@ -39,10 +39,19 @@ REQUIRED_TOOLS = ("qemu-system-x86_64", "qemu-img", "xorriso", "ssh", "ssh-keyge
 
 
 def pytest_addoption(parser):
-    parser.addoption("--keep-vm", action="store_true", default=False,
-                     help="leave the test VM running after the session")
-    parser.addoption("--vm-attach", type=int, default=None, metavar="PORT",
-                     help="use a running test VM listening for ssh on this localhost port")
+    parser.addoption(
+        "--keep-vm",
+        action="store_true",
+        default=False,
+        help="leave the test VM running after the session",
+    )
+    parser.addoption(
+        "--vm-attach",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="use a running test VM listening for ssh on this localhost port",
+    )
 
 
 def missing_prerequisites() -> list:
@@ -70,8 +79,12 @@ def vm(request, tmp_path_factory):
     private_key = ensure_ssh_key(CACHE_DIR / "ssh")[0]
     attach = request.config.getoption("--vm-attach")
     if attach:
-        yield Vm(disk=Path("/dev/null"), workdir=tmp_path_factory.mktemp("vm"), private_key=private_key,
-                 port=attach)
+        yield Vm(
+            disk=Path("/dev/null"),
+            workdir=tmp_path_factory.mktemp("vm"),
+            private_key=private_key,
+            port=attach,
+        )
         return
 
     keep = request.config.getoption("--keep-vm")
@@ -85,8 +98,10 @@ def vm(request, tmp_path_factory):
         raise
     yield machine
     if keep:
-        print(f"\nThe test VM is still running: {' '.join(machine.ssh_argv())}\n"
-              f"Attach to it with --vm-attach={machine.port}")
+        print(
+            f"\nThe test VM is still running: {' '.join(machine.ssh_argv())}\n"
+            f"Attach to it with --vm-attach={machine.port}"
+        )
     else:
         machine.kill()
 
@@ -135,7 +150,9 @@ def make_app(request, host, runner, clean_host, tmp_path):
     report = getattr(request.node, "rep_call", None)
     if report is not None and report.failed:
         for app in made:
-            request.node.add_report_section("call", f"state of {app.name}", diagnose(host, app, since))
+            request.node.add_report_section(
+                "call", f"state of {app.name}", diagnose(host, app, since)
+            )
     if not os.environ.get("QA_KEEP_APPS"):
         for app in made:
             remove_from_host(host, app.name)
@@ -146,9 +163,12 @@ def diagnose(host: Host, app: App, since: str) -> str:
     sections = {
         "units": host.output(f"systemctl list-units --all --no-pager '{app.name}--*'", check=False),
         "deployed files": host.output(
-            f"ls -la /etc/containers/systemd/ /etc/systemd/system/ | grep {app.name}", check=False),
+            f"ls -la /etc/containers/systemd/ /etc/systemd/system/ | grep {app.name}", check=False
+        ),
         "journal": host.journal(since)[-6000:],
-        "last playbook output": app.steps[-1].run.output[-6000:] if app.steps else "(no deploy ran)",
+        "last playbook output": app.steps[-1].run.output[-6000:]
+        if app.steps
+        else "(no deploy ran)",
     }
     return "\n\n".join(f"--- {title} ---\n{body}" for title, body in sections.items())
 

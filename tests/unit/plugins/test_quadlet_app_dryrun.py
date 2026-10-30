@@ -37,7 +37,11 @@ def dryrun(*unit_dirs: Path) -> subprocess.CompletedProcess:
     env = {**os.environ, "QUADLET_UNIT_DIRS": ":".join(str(d) for d in unit_dirs)}
     return subprocess.run(
         [str(QUADLET), "-dryrun", "-no-kmsg-log"],
-        capture_output=True, text=True, env=env, check=False, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=60,
     )
 
 

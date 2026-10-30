@@ -62,7 +62,9 @@ class TestActionPluginFiles:
         ]
         app = ActionPluginFiles(files, ["[Container]\n", "[Timer]\n", "a", "b"]).load("MyApp")
         assert app.name == "myapp"
-        assert [(q.filename, q.source) for q in app.quadlets] == [("main.container", "[Container]\n")]
+        assert [(q.filename, q.source) for q in app.quadlets] == [
+            ("main.container", "[Container]\n")
+        ]
         assert [(u.filename, u.source) for u in app.units] == [("job.timer", "[Timer]\n")]
         assert [(f.kind, f.container, f.path, f.source) for f in app.data_files] == [
             ("init", "main", "a.sql", "a"),
@@ -132,8 +134,11 @@ class TestCheckLocation:
 
     def test_quadlets_missing(self, tmp_path):
         app = make_app(tmp_path / "app")
-        with pytest.raises(QuadletAppError, match="Required directory not found: .*/quadlets. "
-                                                  "The quadlets/ subdirectory is mandatory."):
+        with pytest.raises(
+            QuadletAppError,
+            match="Required directory not found: .*/quadlets. "
+            "The quadlets/ subdirectory is mandatory.",
+        ):
             AppDirectory(str(app)).check_location()
 
     def test_quadlets_is_a_file(self, tmp_path):
@@ -149,8 +154,11 @@ class TestCheckLayout:
 
     def test_main_container_missing(self, tmp_path):
         app = make_app(tmp_path / "app", files=["quadlets/db.container"])
-        with pytest.raises(QuadletAppError, match="Required file not found: .*/quadlets/main.container. "
-                                                  "The quadlets/main.container file is mandatory."):
+        with pytest.raises(
+            QuadletAppError,
+            match="Required file not found: .*/quadlets/main.container. "
+            "The quadlets/main.container file is mandatory.",
+        ):
             AppDirectory(str(app)).check_layout()
 
     def test_main_container_is_a_directory(self, tmp_path):
@@ -196,7 +204,9 @@ class TestCheckLayout:
     def test_other_suffixes_are_treated_as_stems(self, valid_app):
         # Not rejected as "suffixed"; it simply matches no quadlet named "main.volume"
         make_app(valid_app, dirs=["config/main.volume"])
-        with pytest.raises(QuadletAppError, match="No corresponding quadlet file for config/main.volume"):
+        with pytest.raises(
+            QuadletAppError, match="No corresponding quadlet file for config/main.volume"
+        ):
             AppDirectory(str(valid_app)).check_layout()
 
     def test_orphan_directory(self, valid_app):
@@ -209,8 +219,11 @@ class TestCheckLayout:
         )
 
     def test_kube_does_not_count_as_a_match(self, tmp_path):
-        app = make_app(tmp_path / "app", files=["quadlets/main.container", "quadlets/web.kube"],
-                       dirs=["config/web"])
+        app = make_app(
+            tmp_path / "app",
+            files=["quadlets/main.container", "quadlets/web.kube"],
+            dirs=["config/web"],
+        )
         with pytest.raises(QuadletAppError, match="No corresponding quadlet file for config/web"):
             AppDirectory(str(app)).check_layout()
 
@@ -265,7 +278,10 @@ class TestQuadletFiles:
         write(app, "quadlets/backup.timer")
         with pytest.raises(QuadletAppError) as excinfo:
             AppDirectory(str(app)).quadlet_files()
-        assert str(excinfo.value) == "backup.timer is a systemd unit, not a quadlet. Move it to units/."
+        assert (
+            str(excinfo.value)
+            == "backup.timer is a systemd unit, not a quadlet. Move it to units/."
+        )
 
     def test_unreadable(self, app, monkeypatch):
         monkeypatch.setattr(os, "listdir", raiser(OSError("boom")))
@@ -303,9 +319,11 @@ class TestUnitFiles:
         write(app, "units/a.timer")
         real_listdir = os.listdir
         monkeypatch.setattr(
-            os, "listdir",
-            lambda path: raiser(OSError("boom"))() if str(path).endswith("units")
-            else real_listdir(path),
+            os,
+            "listdir",
+            lambda path: (
+                raiser(OSError("boom"))() if str(path).endswith("units") else real_listdir(path)
+            ),
         )
         with pytest.raises(QuadletAppError, match="^Cannot read units directory: boom$"):
             AppDirectory(str(app)).unit_files()
@@ -325,11 +343,13 @@ class TestDataFiles:
         write(app, f"{kind}/main/sub/dir/b.conf")
         write(app, f"{kind}/db/schema.sql")
         found = AppDirectory(str(app)).data_files(kind)
-        assert sorted(found) == sorted([
-            ("db", "schema.sql", str(app / kind / "db/schema.sql")),
-            ("main", "a.conf", str(app / kind / "main/a.conf")),
-            ("main", "sub/dir/b.conf", str(app / kind / "main/sub/dir/b.conf")),
-        ])
+        assert sorted(found) == sorted(
+            [
+                ("db", "schema.sql", str(app / kind / "db/schema.sql")),
+                ("main", "a.conf", str(app / kind / "main/a.conf")),
+                ("main", "sub/dir/b.conf", str(app / kind / "main/sub/dir/b.conf")),
+            ]
+        )
         # Container directories are visited in sorted order
         assert [entry[0] for entry in found] == ["db", "main", "main"]
 

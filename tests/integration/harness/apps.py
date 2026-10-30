@@ -116,11 +116,19 @@ class App:
 
     # --- deploying ---------------------------------------------------------------------------
 
-    def deploy(self, state: str = "started", *, module: str = "kriansa.quadlet.quadlet_app",
-               args: dict[str, Any] | None = None, task_vars: dict[str, Any] | None = None,
-               play_vars: dict[str, Any] | None = None, pre_tasks: list[dict] | None = None,
-               become: bool = True, src: str | None = None,
-               extra_args: list[str] | None = None) -> Step:
+    def deploy(
+        self,
+        state: str = "started",
+        *,
+        module: str = "kriansa.quadlet.quadlet_app",
+        args: dict[str, Any] | None = None,
+        task_vars: dict[str, Any] | None = None,
+        play_vars: dict[str, Any] | None = None,
+        pre_tasks: list[dict] | None = None,
+        become: bool = True,
+        src: str | None = None,
+        extra_args: list[str] | None = None,
+    ) -> Step:
         """
         Deploy the app with a real playbook and return what happened.
 
@@ -144,8 +152,12 @@ class App:
             play["vars"] = play_vars
 
         since = self.host.cursor()
-        run = self.runner.run_plays([play], self.playbook_dir, name=f"{self.name}-{len(self.steps) + 1}",
-                                    extra_args=extra_args)
+        run = self.runner.run_plays(
+            [play],
+            self.playbook_dir,
+            name=f"{self.name}-{len(self.steps) + 1}",
+            extra_args=extra_args,
+        )
         step = Step(run, self.host, since)
         self.steps.append(step)
         return step
@@ -163,8 +175,8 @@ def remove_from_host(host: Host, name: str) -> None:
         "set +e\n"
         f"units=$(systemctl list-units --all --plain --no-legend {prefix}'*' | awk '{{print $1}}')\n"
         f"timers=$(systemctl list-unit-files --plain --no-legend {prefix}'*.timer' | awk '{{print $1}}')\n"
-        "[ -n \"$timers\" ] && systemctl disable --now $timers\n"
-        "[ -n \"$units\" ] && systemctl stop $units\n"
+        '[ -n "$timers" ] && systemctl disable --now $timers\n'
+        '[ -n "$units" ] && systemctl stop $units\n'
         f"rm -f /etc/containers/systemd/{prefix}* /etc/systemd/system/{prefix}*\n"
         f"rm -rf /srv/{shlex.quote(name)}\n"
         f"rm -f /var/lib/quadlet-app/{prefix}*\n"

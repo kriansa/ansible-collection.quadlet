@@ -72,9 +72,12 @@ def test_config_mount_is_read_only_idmapped_and_labelled(make_app, host):
 
 def test_single_file_and_subdirectory_mounts(make_app, host):
     app = make_app("cfgfile")
-    app.write("quadlets/main.container", main(
-        "Volume=%config%/app.conf:/etc/app.conf\nVolume=%init%/sql:/docker-entrypoint-initdb.d\n"
-    ))
+    app.write(
+        "quadlets/main.container",
+        main(
+            "Volume=%config%/app.conf:/etc/app.conf\nVolume=%init%/sql:/docker-entrypoint-initdb.d\n"
+        ),
+    )
     app.write("config/main/app.conf", "a=1\n")
     app.write("init/main/sql/01.sql", "SELECT 1;\n")
 
@@ -82,7 +85,10 @@ def test_single_file_and_subdirectory_mounts(make_app, host):
 
     container = app.container("main")
     assert host.container_exec(container, "cat /etc/app.conf").stdout == "a=1\n"
-    assert host.container_exec(container, "cat /docker-entrypoint-initdb.d/01.sql").stdout == "SELECT 1;\n"
+    assert (
+        host.container_exec(container, "cat /docker-entrypoint-initdb.d/01.sql").stdout
+        == "SELECT 1;\n"
+    )
 
 
 def test_config_change_restarts_the_app_once(make_app, host):

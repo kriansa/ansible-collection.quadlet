@@ -41,7 +41,7 @@ def test_a_container_that_exits_right_after_starting_fails_the_task(fake_host, s
 
     assert outcome.failure == {
         "msg": "app--main.service did not stay running after it was started: it is failed. "
-               "Its last log lines:\nboom\napp--main.service: Failed with result 'exit-code'."
+        "Its last log lines:\nboom\napp--main.service: Failed with result 'exit-code'."
     }
 
 
@@ -52,7 +52,7 @@ def test_a_dependency_that_keeps_crashing_fails_the_task(fake_host, systemd):
 
     assert outcome.failure == {
         "msg": "app--db.service did not stay running after it was started: systemd had to start "
-               "it again."
+        "it again."
     }
 
 

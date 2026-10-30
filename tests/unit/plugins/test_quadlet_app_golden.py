@@ -93,10 +93,12 @@ def test_examples_cover_every_feature():
                 files[f"{app.name}/{path.relative_to(app.path).as_posix()}"] = path.read_text()
 
     missing = [
-        feature for feature, pattern in FEATURES.items()
+        feature
+        for feature, pattern in FEATURES.items()
         if not any(re.search(pattern, rel.split("/", 1)[1]) for rel in files)
     ] + [
-        feature for feature, pattern in CONTENT_FEATURES.items()
+        feature
+        for feature, pattern in CONTENT_FEATURES.items()
         if not any(re.search(pattern, text, re.MULTILINE | re.DOTALL) for text in files.values())
     ]
     assert not missing, f"no example app exercises: {', '.join(missing)}"

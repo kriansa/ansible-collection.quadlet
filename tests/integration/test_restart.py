@@ -27,11 +27,14 @@ def test_changed_secondary_restarts_the_app_once(make_app, host):
     before it counts as started, depends on a secondary container, and mounts an owned volume.
     """
     app = make_app("healthcheck")
-    app.write("quadlets/main.container", container(
-        "Volume=data.volume:/data\n"
-        "HealthCmd=/bin/sh -c 'sleep 1'\nHealthInterval=2s\nNotify=healthy\n",
-        unit="Wants=web.service\nAfter=web.service",
-    ))
+    app.write(
+        "quadlets/main.container",
+        container(
+            "Volume=data.volume:/data\n"
+            "HealthCmd=/bin/sh -c 'sleep 1'\nHealthInterval=2s\nNotify=healthy\n",
+            unit="Wants=web.service\nAfter=web.service",
+        ),
+    )
     app.write("quadlets/web.container", container("Environment=VERSION=1\n"))
     app.write("quadlets/data.volume", "[Volume]\nX-Owner=1000:1000\n")
     app.deploy("started")
@@ -90,7 +93,9 @@ def test_transitive_dependency_is_restarted_once(make_app, host):
     """cache is two Requires= away from main; its new definition still has to take effect."""
     app = make_app("transitive")
     app.write("quadlets/main.container", container(unit="Requires=db.service\nAfter=db.service"))
-    app.write("quadlets/db.container", container(unit="Requires=cache.service\nAfter=cache.service"))
+    app.write(
+        "quadlets/db.container", container(unit="Requires=cache.service\nAfter=cache.service")
+    )
     app.write("quadlets/cache.container", container("Environment=VERSION=1\n"))
     app.deploy("started")
 

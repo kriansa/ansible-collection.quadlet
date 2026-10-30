@@ -39,11 +39,16 @@ class Host:
     def __init__(self, vm: Vm):
         self.vm = vm
 
-    def run(self, command: str, *, check: bool = True, timeout: float = 120) -> subprocess.CompletedProcess:
+    def run(
+        self, command: str, *, check: bool = True, timeout: float = 120
+    ) -> subprocess.CompletedProcess:
         """Run a shell command as root on the VM."""
         result = subprocess.run(
             self.vm.ssh_argv("sudo", "bash", "-c", shlex.quote(command)),
-            capture_output=True, text=True, check=False, timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
         )
         if check and result.returncode != 0:
             raise HostCommandError(
@@ -70,7 +75,10 @@ class Host:
         return self.unit(name, "ActiveState")["ActiveState"]
 
     def is_enabled(self, name: str) -> bool:
-        return self.run(f"systemctl is-enabled {shlex.quote(name)}", check=False).stdout.strip() == "enabled"
+        return (
+            self.run(f"systemctl is-enabled {shlex.quote(name)}", check=False).stdout.strip()
+            == "enabled"
+        )
 
     def unit_exists(self, name: str) -> bool:
         return self.unit(name, "LoadState")["LoadState"] == "loaded"
@@ -99,8 +107,11 @@ class Host:
 
     def journal(self, since: str, unit: str | None = None) -> str:
         unit_filter = f"-u {shlex.quote(unit)}" if unit else ""
-        return self.output(f"journalctl --quiet --no-pager -o short-precise "
-                           f"--after-cursor={shlex.quote(since)} {unit_filter}", check=False)
+        return self.output(
+            f"journalctl --quiet --no-pager -o short-precise "
+            f"--after-cursor={shlex.quote(since)} {unit_filter}",
+            check=False,
+        )
 
     # --- files -------------------------------------------------------------------------------
 
@@ -111,7 +122,9 @@ class Host:
         """A file's exact content. Read as bytes: text mode would turn \\r\\n into \\n."""
         result = subprocess.run(
             self.vm.ssh_argv("sudo", "cat", shlex.quote(path)),
-            capture_output=True, check=False, timeout=60,
+            capture_output=True,
+            check=False,
+            timeout=60,
         )
         if result.returncode != 0:
             raise HostCommandError(f"cannot read {path}: {result.stderr.decode(errors='replace')}")
@@ -134,15 +147,22 @@ class Host:
         return json.loads(self.output(f"podman inspect {shlex.quote(container)}"))[0]
 
     def container_exec(self, container: str, command: str, **kwargs) -> subprocess.CompletedProcess:
-        return self.run(f"podman exec {shlex.quote(container)} sh -c {shlex.quote(command)}", **kwargs)
+        return self.run(
+            f"podman exec {shlex.quote(container)} sh -c {shlex.quote(command)}", **kwargs
+        )
 
     def uid_map(self, container: str) -> list[list[int]]:
         """The container's uid map: [inside, outside, count] per line."""
         pid = self.inspect(container)["State"]["Pid"]
-        return [[int(n) for n in line.split()] for line in self.output(f"cat /proc/{pid}/uid_map").splitlines()]
+        return [
+            [int(n) for n in line.split()]
+            for line in self.output(f"cat /proc/{pid}/uid_map").splitlines()
+        ]
 
     def volume_mountpoint(self, volume: str) -> str:
-        return self.output(f"podman volume inspect --format '{{{{.Mountpoint}}}}' {shlex.quote(volume)}")
+        return self.output(
+            f"podman volume inspect --format '{{{{.Mountpoint}}}}' {shlex.quote(volume)}"
+        )
 
     def seed_volume(self, volume: str, owner: str = "0:0") -> str:
         """

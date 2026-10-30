@@ -79,7 +79,10 @@ class TestTimer:
     )
     def test_explicit_unit_is_resolved_then_prefixed(self, unit, expected):
         out = render(
-            "backup.timer", f"[Timer]\nOnCalendar=daily\nUnit={unit}\n", backup=".container", job=".pod"
+            "backup.timer",
+            f"[Timer]\nOnCalendar=daily\nUnit={unit}\n",
+            backup=".container",
+            job=".pod",
         )
         assert out == f"[Timer]\nOnCalendar=daily\nUnit={expected}\n" + INSTALL
 
@@ -92,13 +95,18 @@ class TestTimer:
         assert "Unit=x.target\n" in out
 
     def test_spaced_unit_is_resolved_and_not_duplicated(self):
-        out = render("x.timer", "[Timer]\nOnCalendar=daily\nUnit = job.container\n", job=".container")
+        out = render(
+            "x.timer", "[Timer]\nOnCalendar=daily\nUnit = job.container\n", job=".container"
+        )
         assert "Unit = app--job.service\n" in out
         assert out.count("Unit") == 1
 
     def test_commented_unit_does_not_count(self):
         out = render("b.timer", "[Timer]\n# Unit=other.service\nOnCalendar=daily\n")
-        assert out == "[Timer]\n# Unit=other.service\nOnCalendar=daily\nUnit=app--b.service\n" + INSTALL
+        assert (
+            out
+            == "[Timer]\n# Unit=other.service\nOnCalendar=daily\nUnit=app--b.service\n" + INSTALL
+        )
 
     def test_empty_unit_suppresses_injection(self):
         # Pinned: the timer deploys with an empty Unit= and never fires
@@ -112,7 +120,9 @@ class TestTimer:
         )
 
     def test_existing_wanted_by_is_kept(self):
-        content = "[Timer]\nOnCalendar=daily\nUnit=x.service\n\n[Install]\nWantedBy=multi-user.target\n"
+        content = (
+            "[Timer]\nOnCalendar=daily\nUnit=x.service\n\n[Install]\nWantedBy=multi-user.target\n"
+        )
         assert render("x.timer", content, x=".container") == content.replace(
             "Unit=x.service", "Unit=app--x.service"
         )

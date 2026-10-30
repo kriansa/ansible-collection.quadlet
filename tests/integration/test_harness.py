@@ -18,7 +18,9 @@ def test_user_namespace_range_is_configured(host):
 
 
 def test_images_are_present_offline(host):
-    assert host.run("podman image exists docker.io/library/alpine:3.24", check=False).returncode == 0
+    assert (
+        host.run("podman image exists docker.io/library/alpine:3.24", check=False).returncode == 0
+    )
 
 
 def test_no_internet(host):
@@ -33,12 +35,20 @@ def test_quadlet_generator_is_installed(host):
 
 def test_collection_resolves_to_this_checkout(runner, tmp_path):
     run = runner.run_plays(
-        [{
-            "hosts": "testhost",
-            "gather_facts": False,
-            "tasks": [{"name": "where", "ansible.builtin.debug": {
-                "msg": "{{ lookup('ansible.builtin.config', 'COLLECTIONS_PATHS') }}"}}],
-        }],
+        [
+            {
+                "hosts": "testhost",
+                "gather_facts": False,
+                "tasks": [
+                    {
+                        "name": "where",
+                        "ansible.builtin.debug": {
+                            "msg": "{{ lookup('ansible.builtin.config', 'COLLECTIONS_PATHS') }}"
+                        },
+                    }
+                ],
+            }
+        ],
         tmp_path,
     )
     assert run.returncode == 0, run.output

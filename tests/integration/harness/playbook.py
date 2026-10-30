@@ -90,14 +90,27 @@ class PlaybookRunner:
         )
         return env
 
-    def run(self, playbook: Path, *, extra_args: list[str] | None = None,
-            timeout: float = 900) -> PlaybookRun:
+    def run(
+        self, playbook: Path, *, extra_args: list[str] | None = None, timeout: float = 900
+    ) -> PlaybookRun:
         """Run a playbook file and collect its results."""
         capture = Path(tempfile.mkstemp(prefix="results-", suffix=".jsonl", dir=self.workdir)[1])
-        argv = [str(Path(sys.executable).parent / "ansible-playbook"), "-i", str(self.inventory),
-                str(playbook), *(extra_args or [])]
-        process = subprocess.run(argv, capture_output=True, text=True, env=self.environment(capture),
-                                 cwd=playbook.parent, check=False, timeout=timeout)
+        argv = [
+            str(Path(sys.executable).parent / "ansible-playbook"),
+            "-i",
+            str(self.inventory),
+            str(playbook),
+            *(extra_args or []),
+        ]
+        process = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            env=self.environment(capture),
+            cwd=playbook.parent,
+            check=False,
+            timeout=timeout,
+        )
         tasks = [
             TaskResult(entry["task"], entry["action"], entry["status"], entry["result"])
             for entry in map(json.loads, capture.read_text().splitlines())
@@ -106,8 +119,9 @@ class PlaybookRunner:
         self.history.append(run)
         return run
 
-    def run_plays(self, plays: list[dict[str, Any]], directory: Path, *, name: str = "step",
-                  **kwargs) -> PlaybookRun:
+    def run_plays(
+        self, plays: list[dict[str, Any]], directory: Path, *, name: str = "step", **kwargs
+    ) -> PlaybookRun:
         """Write plays to a playbook file in `directory` and run it."""
         directory.mkdir(parents=True, exist_ok=True)
         playbook = directory / f"{name}.yml"
@@ -117,7 +131,6 @@ class PlaybookRunner:
 
 def write_inventory(path: Path, port: int) -> Path:
     path.write_text(
-        "[test]\n"
-        f"testhost ansible_host=127.0.0.1 ansible_port={port} ansible_user=qa\n"
+        f"[test]\ntesthost ansible_host=127.0.0.1 ansible_port={port} ansible_user=qa\n"
     )
     return path

@@ -49,11 +49,13 @@ def test_lookups(make_app, host, monkeypatch):
     app.write("quadlets/main.container", main())
     (app.playbook_dir / "files").mkdir(parents=True, exist_ok=True)
     (app.playbook_dir / "files" / "note.txt").write_text("from-file\n")
-    app.write("config/main/out",
-              "E={{ lookup('env', 'QA_LOOKUP_VALUE') }}\n"
-              "F={{ lookup('file', 'note.txt') }}\n"
-              "P={{ lookup('passwordstore', 'test/secret-1') }}\n"
-              "M=\n  {{ lookup('passwordstore', 'test/secret-2 returnall=true') | indent(2) }}\n")
+    app.write(
+        "config/main/out",
+        "E={{ lookup('env', 'QA_LOOKUP_VALUE') }}\n"
+        "F={{ lookup('file', 'note.txt') }}\n"
+        "P={{ lookup('passwordstore', 'test/secret-1') }}\n"
+        "M=\n  {{ lookup('passwordstore', 'test/secret-2 returnall=true') | indent(2) }}\n",
+    )
 
     app.deploy("installed")
 
@@ -66,14 +68,16 @@ def test_lookups(make_app, host, monkeypatch):
 def test_jinja_features(make_app, host):
     app = make_app("jinja")
     app.write("quadlets/main.container", main())
-    app.write("config/main/out",
-              "{# a comment that disappears #}\n"
-              "{% raw %}{{ kept }}{% endraw %}\n"
-              "{{ '{{' }} escaped\n"
-              "{% for n in [1, 2] -%}\n"
-              "n={{ n }}\n"
-              "{% endfor -%}\n"
-              "end\n")
+    app.write(
+        "config/main/out",
+        "{# a comment that disappears #}\n"
+        "{% raw %}{{ kept }}{% endraw %}\n"
+        "{{ '{{' }} escaped\n"
+        "{% for n in [1, 2] -%}\n"
+        "n={{ n }}\n"
+        "{% endfor -%}\n"
+        "end\n",
+    )
 
     app.deploy("installed")
 
@@ -84,12 +88,20 @@ def test_jinja_features(make_app, host):
 
 def test_facts_gathered_earlier_in_the_play(make_app, host):
     app = make_app("facts")
-    app.write("quadlets/main.container",
-              main("User=1000:1000\nGroupAdd={{ ansible_facts.getent_group['wheel'][1] }}\n"))
+    app.write(
+        "quadlets/main.container",
+        main("User=1000:1000\nGroupAdd={{ ansible_facts.getent_group['wheel'][1] }}\n"),
+    )
 
-    app.deploy("started", pre_tasks=[
-        {"name": "look up the wheel group", "ansible.builtin.getent": {"database": "group", "key": "wheel"}}
-    ])
+    app.deploy(
+        "started",
+        pre_tasks=[
+            {
+                "name": "look up the wheel group",
+                "ansible.builtin.getent": {"database": "group", "key": "wheel"},
+            }
+        ],
+    )
 
     assert "GroupAdd=10\n" in host.read(app.quadlet_path("main.container"))
     groups = host.container_exec(app.container("main"), "id -G").stdout.split()
@@ -104,7 +116,9 @@ def test_undefined_variable_deploys_nothing(make_app, host):
 
     path = app.directory / "quadlets" / "main.container"
     assert step.failed
-    assert step.msg.startswith(f"Failed to process files on control node: Failed to template file {path}: ")
+    assert step.msg.startswith(
+        f"Failed to process files on control node: Failed to template file {path}: "
+    )
     assert "'nope' is undefined" in step.msg
     assert not host.exists(app.quadlet_path("main.container"))
 
@@ -117,8 +131,11 @@ def test_vault_encrypted_file(make_app, host, tmp_path):
     password_file = tmp_path / "vault-password"
     password_file.write_text("vault-password\n")
 
-    app.deploy("installed", play_vars={"token": "abc"},
-               extra_args=["--vault-password-file", str(password_file)])
+    app.deploy(
+        "installed",
+        play_vars={"token": "abc"},
+        extra_args=["--vault-password-file", str(password_file)],
+    )
 
     assert config_of(host, app) == "TOKEN=abc\n"
 
@@ -133,8 +150,10 @@ def test_non_utf8_file(make_app, host):
 
     assert step.failed
     assert step.msg.startswith("Failed to process files on control node: File "), step.msg
-    assert step.msg.endswith("/config/main/out is not valid UTF-8: 'utf-8' codec can't decode "
-                             "byte 0xff in position 1: invalid start byte"), step.msg
+    assert step.msg.endswith(
+        "/config/main/out is not valid UTF-8: 'utf-8' codec can't decode "
+        "byte 0xff in position 1: invalid start byte"
+    ), step.msg
     assert not host.exists(app.quadlet_path("main.container"))
     assert not host.exists(f"/srv/{app.name}")
 

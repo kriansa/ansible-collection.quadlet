@@ -146,11 +146,16 @@ class TestWrite:
         assert excinfo.value.msg.startswith(f"Failed to write file {file.dest_path}: ")
         assert os.listdir(os.path.dirname(file.dest_path)) == ["f"]
 
-    @pytest.mark.parametrize("content, error", [
-        ("a\udcffb",
-         "'utf-8' codec can't encode character '\\udcff' in position 1: surrogates not allowed"),
-        (42, "write() argument must be str, not int"),
-    ])
+    @pytest.mark.parametrize(
+        "content, error",
+        [
+            (
+                "a\udcffb",
+                "'utf-8' codec can't encode character '\\udcff' in position 1: surrogates not allowed",
+            ),
+            (42, "write() argument must be str, not int"),
+        ],
+    )
     def test_a_failed_write_leaves_the_previous_file_in_place(self, app, content, error):
         file = config_file(app, content)
         on_host(file, "old")

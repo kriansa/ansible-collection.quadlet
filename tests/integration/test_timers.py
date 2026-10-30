@@ -26,8 +26,13 @@ def timer_unit(app, stem="job"):
 
 
 def timer_state(host, app):
-    return host.unit(timer_unit(app), "InvocationID", "ActiveEnterTimestampMonotonic", "ActiveState",
-                     "UnitFileState")
+    return host.unit(
+        timer_unit(app),
+        "InvocationID",
+        "ActiveEnterTimestampMonotonic",
+        "ActiveState",
+        "UnitFileState",
+    )
 
 
 def test_enabled_and_started_even_when_only_installed(make_app, host):
@@ -128,7 +133,9 @@ def test_pod_target_resolves_to_the_pod_service(make_app, host):
 
     app.deploy("installed")
 
-    assert f"Unit={app.name}--batch-pod.service" in host.read(f"/etc/systemd/system/{timer_unit(app, 'batch')}")
+    assert f"Unit={app.name}--batch-pod.service" in host.read(
+        f"/etc/systemd/system/{timer_unit(app, 'batch')}"
+    )
     assert host.active_state(timer_unit(app, "batch")) == "active"
 
 
@@ -152,8 +159,10 @@ def test_timer_in_quadlets_is_rejected(make_app, host):
     step = app.deploy("installed")
 
     assert step.failed
-    assert step.msg == ("Failed to process files on control node: "
-                        "job.timer is a systemd unit, not a quadlet. Move it to units/.")
+    assert step.msg == (
+        "Failed to process files on control node: "
+        "job.timer is a systemd unit, not a quadlet. Move it to units/."
+    )
     assert not host.exists(app.quadlet_path("main.container"))
 
 
@@ -165,8 +174,10 @@ def test_stray_file_in_units_is_rejected(make_app, host):
     step = app.deploy("installed")
 
     assert step.failed
-    assert step.msg == ("Failed to process files on control node: "
-                        "Unsupported file in units/: job.service. Only .timer files are supported.")
+    assert step.msg == (
+        "Failed to process files on control node: "
+        "Unsupported file in units/: job.service. Only .timer files are supported."
+    )
 
 
 def test_timer_without_timer_section(make_app, host):

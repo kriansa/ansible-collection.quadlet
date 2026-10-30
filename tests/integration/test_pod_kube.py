@@ -22,7 +22,10 @@ spec:
 def pod_app(make_app, tag, container_extra=""):
     app = make_app(tag)
     app.write("quadlets/backend.pod", "[Pod]\nVolume=%config%:/etc/shared\n")
-    app.write("quadlets/main.container", f"[Container]\n{IMAGE}\n{IDLE}\nPod=backend.pod\n{container_extra}")
+    app.write(
+        "quadlets/main.container",
+        f"[Container]\n{IMAGE}\n{IDLE}\nPod=backend.pod\n{container_extra}",
+    )
     app.write("config/backend/shared.conf", "x=1\n")
     return app
 
@@ -51,13 +54,17 @@ def test_container_in_a_pod_runs(make_app, host):
     assert host.active_state(app.service("main")) == "active"
     assert host.active_state(f"{app.name}--backend-pod.service") == "active"
     # A pod's volumes are mounted into every container that joins it
-    assert host.container_exec(app.container("main"), "cat /etc/shared/shared.conf").stdout == "x=1\n"
+    assert (
+        host.container_exec(app.container("main"), "cat /etc/shared/shared.conf").stdout == "x=1\n"
+    )
 
 
 def test_kube(make_app, host):
     app = make_app("kube")
-    app.write("quadlets/main.kube",
-              "[Kube]\nYaml=/srv/{{ quadlet_app_name }}/config/k/pod.yaml\nNetwork=main.network\n")
+    app.write(
+        "quadlets/main.kube",
+        "[Kube]\nYaml=/srv/{{ quadlet_app_name }}/config/k/pod.yaml\nNetwork=main.network\n",
+    )
     app.write("quadlets/main.network", "[Network]\n")
     app.write("config/k/pod.yaml", KUBE_POD)
 

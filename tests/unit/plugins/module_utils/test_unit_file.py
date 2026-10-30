@@ -41,15 +41,17 @@ class TestDirective:
 
 class TestTextHelpers:
     def test_strip_directive(self):
-        content = "[Volume]\nX-Owner=1:1\n  X-Owner=2:2\n# X-Owner=3:3\nX-OwnerFoo=4\nDriver=local\n"
+        content = (
+            "[Volume]\nX-Owner=1:1\n  X-Owner=2:2\n# X-Owner=3:3\nX-OwnerFoo=4\nDriver=local\n"
+        )
         assert edited(content, lambda unit: unit.strip_directive("X-Owner")) == (
             "[Volume]\n# X-Owner=3:3\nX-OwnerFoo=4\nDriver=local\n"
         )
 
     def test_spaced_directive_is_stripped(self):
-        assert edited("[Volume]\nX-Owner = 1:1\n", lambda unit: unit.strip_directive("X-Owner")) == (
-            "[Volume]\n"
-        )
+        assert edited(
+            "[Volume]\nX-Owner = 1:1\n", lambda unit: unit.strip_directive("X-Owner")
+        ) == ("[Volume]\n")
 
     @pytest.mark.parametrize(
         "content, expected",
@@ -67,7 +69,12 @@ class TestTextHelpers:
 
     @pytest.mark.parametrize(
         "content, expected",
-        [("[Timer]\n", True), ("  [Timer]  \n", True), ("# [Timer]\n", False), ("[Timers]\n", False)],
+        [
+            ("[Timer]\n", True),
+            ("  [Timer]  \n", True),
+            ("# [Timer]\n", False),
+            ("[Timers]\n", False),
+        ],
     )
     def test_has_section(self, content, expected):
         assert UnitFile(content).has_section("Timer") is expected
@@ -164,13 +171,22 @@ class TestAppendToSection:
             ("[Service]\nB=2\n", False, "[Unit]\nX=1\n\n[Service]\nB=2\n"),
             ("", False, "[Unit]\nX=1\n\n"),
             # ... but below the comments that open the file
-            ("# The app\n\n[Service]\nB=2\n", False,
-             "# The app\n\n[Unit]\nX=1\n\n[Service]\nB=2\n"),
+            (
+                "# The app\n\n[Service]\nB=2\n",
+                False,
+                "# The app\n\n[Unit]\nX=1\n\n[Service]\nB=2\n",
+            ),
             # ... and above a comment touching the first header, which is about that section
-            ("# The app\n\n# The service\n[Service]\nB=2\n", False,
-             "# The app\n\n[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n"),
-            ("# The service\n[Service]\nB=2\n", False,
-             "[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n"),
+            (
+                "# The app\n\n# The service\n[Service]\nB=2\n",
+                False,
+                "# The app\n\n[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n",
+            ),
+            (
+                "# The service\n[Service]\nB=2\n",
+                False,
+                "[Unit]\nX=1\n\n# The service\n[Service]\nB=2\n",
+            ),
             # A file of comments only
             ("# Nothing yet\n", False, "# Nothing yet\n\n[Unit]\nX=1\n"),
             # Missing section, opened at the end, trailing blank lines moved before it
@@ -187,9 +203,9 @@ class TestAppendToSection:
 
     def test_at_end_only_matters_when_the_section_is_missing(self):
         content = "[Unit]\nA=1\n\n[Service]\nB=2\n"
-        assert edited(content, lambda unit: unit.append_to_section("Unit", ["X=1"], at_end=True)) == (
-            "[Unit]\nA=1\nX=1\n\n[Service]\nB=2\n"
-        )
+        assert edited(
+            content, lambda unit: unit.append_to_section("Unit", ["X=1"], at_end=True)
+        ) == ("[Unit]\nA=1\nX=1\n\n[Service]\nB=2\n")
 
     def test_several_lines_keep_their_order(self):
         assert edited("[Unit]\n", lambda unit: unit.append_to_section("Unit", ["A=1", "B=2"])) == (

@@ -20,16 +20,19 @@ MAIN = "[Container]\nImage=alpine\n"
 def raising(exc):
     def run(argv, **kwargs):
         raise exc
+
     return run
 
 
 def install(monkeypatch, run):
     """Replace subprocess.run, wherever the module starts a process, with a function."""
-    install_processes(monkeypatch, SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    install_processes(
+        monkeypatch, SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired)
+    )
 
 
 def test_failure_reports_the_generator_output_and_writes_nothing(fake_host, systemd):
-    systemd.generator_result = (1, "partial", "converting \"app--main.container\": bad key\n")
+    systemd.generator_result = (1, "partial", 'converting "app--main.container": bad key\n')
     outcome = run_module(make_files_data(quadlets={"main.container": MAIN}), state="started")
 
     assert outcome.failure == {
@@ -37,7 +40,7 @@ def test_failure_reports_the_generator_output_and_writes_nothing(fake_host, syst
         "cmd": f"{GENERATOR} -dryrun -v",
         "rc": 1,
         "stdout": "partial",
-        "stderr": "converting \"app--main.container\": bad key\n",
+        "stderr": 'converting "app--main.container": bad key\n',
     }
     # Validation runs on a staged copy, before anything reaches the host
     assert fake_host.files() == {}
@@ -60,10 +63,13 @@ def test_validates_only_this_apps_quadlets(fake_host, systemd):
     assert call.unit_dirs != str(fake_host.quadlet_dir)
     # Every quadlet the app deploys, generated ones included; no timers or config files
     assert sorted(call.staged) == [
-        "app--data-volume-init.container", "app--data.volume", "app--main.container",
+        "app--data-volume-init.container",
+        "app--data.volume",
+        "app--main.container",
     ]
-    assert call.staged["app--main.container"] == (
-        fake_host.files()["etc/containers/systemd/app--main.container"]
+    assert (
+        call.staged["app--main.container"]
+        == (fake_host.files()["etc/containers/systemd/app--main.container"])
     )
 
 
@@ -89,7 +95,10 @@ def test_quadlets_of_other_apps_it_names_are_validated_with_it(fake_host, system
 
     [call] = systemd.generator_calls
     assert sorted(call.staged) == [
-        "app--main.container", "ing--certs.volume", "ing--edge.pod", "ing--main.network",
+        "app--main.container",
+        "ing--certs.volume",
+        "ing--edge.pod",
+        "ing--main.network",
     ]
 
 

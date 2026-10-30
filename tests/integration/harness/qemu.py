@@ -60,15 +60,28 @@ class Vm:
         restrict = "" if self.internet else ",restrict=on"
         argv = [
             "qemu-system-x86_64",
-            "-enable-kvm", "-cpu", "host", "-machine", "q35",
-            "-smp", str(self.cpus), "-m", str(self.memory_mb),
+            "-enable-kvm",
+            "-cpu",
+            "host",
+            "-machine",
+            "q35",
+            "-smp",
+            str(self.cpus),
+            "-m",
+            str(self.memory_mb),
             # cache=unsafe: the disk is a throwaway overlay, and losing it on a host crash is fine
-            "-drive", f"file={self.disk},if=virtio,format=qcow2,cache=unsafe,discard=unmap",
-            "-nic", f"user,model=virtio-net-pci{restrict},hostfwd=tcp:127.0.0.1:{self.port}-:22",
-            "-device", "virtio-rng-pci",
-            "-serial", f"file:{self.serial_log}",
-            "-qmp", f"unix:{self.qmp_socket},server=on,wait=off",
-            "-display", "none",
+            "-drive",
+            f"file={self.disk},if=virtio,format=qcow2,cache=unsafe,discard=unmap",
+            "-nic",
+            f"user,model=virtio-net-pci{restrict},hostfwd=tcp:127.0.0.1:{self.port}-:22",
+            "-device",
+            "virtio-rng-pci",
+            "-serial",
+            f"file:{self.serial_log}",
+            "-qmp",
+            f"unix:{self.qmp_socket},server=on,wait=off",
+            "-display",
+            "none",
         ]
         if self.seed is not None:
             argv += ["-drive", f"file={self.seed},if=virtio,format=raw,readonly=on"]
@@ -87,11 +100,23 @@ class Vm:
 
     def ssh_argv(self, *command: str) -> list[str]:
         return [
-            "ssh", "-p", str(self.port), "-i", str(self.private_key),
-            "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR",
-            f"{USER}@127.0.0.1", *command,
+            "ssh",
+            "-p",
+            str(self.port),
+            "-i",
+            str(self.private_key),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "LogLevel=ERROR",
+            f"{USER}@127.0.0.1",
+            *command,
         ]
 
     def wait_for_ssh(self, timeout: float = 180) -> None:
@@ -100,7 +125,9 @@ class Vm:
             if self.process.poll() is not None:
                 stderr = (self.workdir / "qemu.stderr").read_text(errors="replace")
                 raise RuntimeError(f"QEMU exited ({self.process.returncode}): {stderr}")
-            result = subprocess.run(self.ssh_argv("true"), capture_output=True, check=False, timeout=30)
+            result = subprocess.run(
+                self.ssh_argv("true"), capture_output=True, check=False, timeout=30
+            )
             if result.returncode == 0:
                 return
             time.sleep(1)
@@ -123,8 +150,12 @@ class Vm:
 
     def power_off(self, timeout: float = 120) -> None:
         """Shut the guest down cleanly, so everything it wrote reaches the disk."""
-        subprocess.run(self.ssh_argv("sudo", "systemctl", "poweroff"), capture_output=True,
-                       check=False, timeout=30)
+        subprocess.run(
+            self.ssh_argv("sudo", "systemctl", "poweroff"),
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
         try:
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

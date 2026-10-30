@@ -43,7 +43,9 @@ def captured_params(monkeypatch):
 def logged(monkeypatch):
     """Capture what AnsibleModule would send to the journal or syslog."""
     messages = []
-    monkeypatch.setattr(basic.AnsibleModule, "log", lambda self, msg, log_args=None: messages.append(msg))
+    monkeypatch.setattr(
+        basic.AnsibleModule, "log", lambda self, msg, log_args=None: messages.append(msg)
+    )
     return messages
 
 
@@ -85,7 +87,9 @@ def test_check_mode_is_not_supported(capsys, captured_params):
 
 def test_contents_are_never_logged_but_names_are(capsys, captured_params, logged):
     files = make_files_data(quadlets={"main.container": f"Environment=PW={SECRET}\n"})
-    call_main(capsys, {"src": "/apps/app", "_control_node_processed": True, **to_module_args(files)})
+    call_main(
+        capsys, {"src": "/apps/app", "_control_node_processed": True, **to_module_args(files)}
+    )
 
     invocation = [message for message in logged if message.startswith("Invoked with")]
     assert invocation, logged
@@ -99,12 +103,18 @@ def test_file_names_are_readable_in_the_result(capsys, fake_host, systemd):
     Only contents are no_log. Were names among them, Ansible would mask every occurrence of
     "main.container" - and of "main", the config directory name - anywhere in the output.
     """
-    files = make_files_data(quadlets={"main.container": "[Container]\nImage=alpine\n"},
-                            config={"main": {"app.conf": "x=1\n"}})
+    files = make_files_data(
+        quadlets={"main.container": "[Container]\nImage=alpine\n"},
+        config={"main": {"app.conf": "x=1\n"}},
+    )
     result = call_main(
         capsys,
-        {"src": "/apps/app", "_control_node_processed": True, "state": "installed",
-         **to_module_args(files)},
+        {
+            "src": "/apps/app",
+            "_control_node_processed": True,
+            "state": "installed",
+            **to_module_args(files),
+        },
     )
     assert result["quadlet_files"] == ["app--main.container"]
     assert result["service_name"] == "app--main.service"
@@ -146,5 +156,10 @@ def test_documentation_matches_the_argument_spec(monkeypatch):
 def test_examples_and_return_are_valid_yaml():
     assert isinstance(yaml.safe_load(quadlet_app.EXAMPLES), list)
     assert set(yaml.safe_load(quadlet_app.RETURN)) == {
-        "changed", "application_name", "service_name", "quadlet_files", "unit_files", "msg"
+        "changed",
+        "application_name",
+        "service_name",
+        "quadlet_files",
+        "unit_files",
+        "msg",
     }

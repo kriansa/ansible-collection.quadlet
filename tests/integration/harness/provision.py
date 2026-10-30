@@ -59,7 +59,19 @@ def image_key(public_key: str) -> str:
 
 def create_overlay(base: Path, overlay: Path) -> Path:
     subprocess.run(
-        ["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", str(base), str(overlay), DISK_SIZE],
+        [
+            "qemu-img",
+            "create",
+            "-q",
+            "-f",
+            "qcow2",
+            "-F",
+            "qcow2",
+            "-b",
+            str(base),
+            str(overlay),
+            DISK_SIZE,
+        ],
         check=True,
     )
     return overlay
@@ -79,14 +91,26 @@ def ensure_test_image() -> Path:
             work = Path(scratch)
             disk = create_overlay(base, work / "disk.qcow2")
             seed = build_seed(work / "seed.iso", public_key)
-            vm = Vm(disk=disk, workdir=work, private_key=private_key, seed=seed, internet=True,
-                    memory_mb=4096, cpus=4).start()
+            vm = Vm(
+                disk=disk,
+                workdir=work,
+                private_key=private_key,
+                seed=seed,
+                internet=True,
+                memory_mb=4096,
+                cpus=4,
+            ).start()
             try:
                 vm.wait_for_ssh(timeout=300)
-                subprocess.run(vm.ssh_argv("sudo", "cloud-init", "status", "--wait"),
-                               capture_output=True, check=False, timeout=600)
-                runner = PlaybookRunner(write_inventory(work / "inventory", vm.port), private_key,
-                                        work / "ansible")
+                subprocess.run(
+                    vm.ssh_argv("sudo", "cloud-init", "status", "--wait"),
+                    capture_output=True,
+                    check=False,
+                    timeout=600,
+                )
+                runner = PlaybookRunner(
+                    write_inventory(work / "inventory", vm.port), private_key, work / "ansible"
+                )
                 run = runner.run(PROVISION_PLAYBOOK, timeout=1800)
                 if run.returncode != 0:
                     raise RuntimeError(f"provisioning failed:\n{run.output}")
@@ -96,7 +120,9 @@ def ensure_test_image() -> Path:
 
             # Flatten so the cached image does not depend on the base image staying in place
             partial = golden.with_suffix(".qcow2.part")
-            subprocess.run(["qemu-img", "convert", "-O", "qcow2", str(disk), str(partial)], check=True)
+            subprocess.run(
+                ["qemu-img", "convert", "-O", "qcow2", str(disk), str(partial)], check=True
+            )
             partial.rename(golden)
 
         for stale in CACHE_DIR.glob("test-host-*.qcow2"):
