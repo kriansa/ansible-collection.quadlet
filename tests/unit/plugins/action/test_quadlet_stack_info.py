@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from ansible.errors import AnsibleActionFail
+from ansible.parsing.vault import VaultLib, VaultSecret
 
 from ansible_collections.kriansa.quadlet.plugins.action import quadlet_stack_info as action_plugin
 from ansible_collections.kriansa.quadlet.tests.unit._support.action import run_action
@@ -172,6 +173,14 @@ class TestEveryAppIsRead:
         assert "The version in" in message
         assert "/bad/application.yml must be a string" in message
 
+    def test_a_manifest_that_cannot_be_decrypted(self, playbook_dir):
+        # Every app is read, so the message has to say which one stopped the run
+        secret = [("default", VaultSecret(b"vault-password"))]
+        manifest = VaultLib(secret).encrypt('version: "v1"\n').decode()
+        message = failure(playbook_dir, {"web": {**MAIN, "application.yml": manifest}})
+        path = playbook_dir / "quadlet-apps" / "web" / "application.yml"
+        assert message.startswith(f"Failed to read {path}: ")
+
     def test_a_quadlet_that_does_not_render(self, playbook_dir):
         message = failure(
             playbook_dir, {"web": {"quadlets/main.container": "Image={{ undefined_var }}\n"}}
@@ -283,26 +292,29 @@ class TestClaims:
         ]
         assert claims["zeta"] == [{"app": "beta", "claim": "b1"}]
 
-    def test_rendered_once_with_the_tasks_variables(self, playbook_dir):
+    def test_templated_with_the_tasks_variables(self, playbook_dir):
         manifest = (
             'version: "v1"\n'
             "resource_claims:\n"
             "  ingress:\n"
             '    - upstream: "{{ quadlet_app_name }}--main:{{ port }}"\n'
-            "{% for name in extra_names %}\n"
-            '    - upstream: "{{ name }}"\n'
-            "{% endfor %}\n"
+            '      port: "{{ port }}"\n'
+            '  dns: "{{ dns_claims }}"\n'
         )
         result = stack(
             playbook_dir,
             {"web": {**MAIN, "application.yml": manifest}},
-            task_vars={"port": 8080, "extra_names": ["a", "b"]},
+            task_vars={"port": 8080, "dns_claims": [{"name": "a"}, {"name": "b"}]},
         )
-        assert [entry["claim"] for entry in result["claims_by_role"]["ingress"]] == [
-            {"upstream": "web--main:8080"},
-            {"upstream": "a"},
-            {"upstream": "b"},
-        ]
+        claims = {
+            role: [entry["claim"] for entry in entries]
+            for role, entries in result["claims_by_role"].items()
+        }
+        assert claims == {
+            # A value that is a single expression keeps its type, as in a playbook
+            "ingress": [{"upstream": "web--main:8080", "port": 8080}],
+            "dns": [{"name": "a"}, {"name": "b"}],
+        }
 
 
 class TestNetworks:

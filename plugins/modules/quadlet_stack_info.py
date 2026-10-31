@@ -13,9 +13,10 @@ version_added: "1.0.0"
 description:
     - Reads every app under O(src) on the control node - one directory per app, laid out as
       M(kriansa.quadlet.quadlet_app) expects - and reports what they make up together.
-    - Each app's manifest, C(application.yml) or C(application.yaml), is rendered with the task's
-      variables and read. An app without one gets the defaults and claims nothing.
-    - Each app's containers, pods, kube files and networks are rendered too, to report the
+    - Each app's manifest, C(application.yml) or C(application.yaml), is read the way Ansible reads
+      a playbook - as YAML, and then its values are templated with the task's variables. An app
+      without one gets the defaults and claims nothing.
+    - Each app's containers, pods, kube files and networks are rendered, to report the
       networks the app joins and to check its main quadlet exists.
     - Every app is read, always. One that cannot be read fails the task, whichever apps are about
       to be deployed.
@@ -39,9 +40,8 @@ author:
     - Daniel Pereira (@kriansa)
 notes:
     - This runs on the control node only, and never connects to the managed host.
-    - "Template manifest values as C({{ var | to_json }}), unquoted. The file is read as YAML after
-      rendering, so a value written plainly is read as whatever YAML makes of it, and one put in
-      quotes loses its backslashes, or becomes text where a number was meant."
+    - "As in a playbook, quote a manifest value that starts with C({{), and a value that is a single
+      expression keeps the type of what it returns. Keys and the version are never templated."
 """
 
 EXAMPLES = r"""

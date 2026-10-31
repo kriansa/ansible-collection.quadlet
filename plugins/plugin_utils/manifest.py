@@ -5,9 +5,9 @@
 """
 An app's manifest: what the app says about itself beyond its quadlets.
 
-It lives beside the app's quadlets as application.yml (or application.yaml), is rendered with
-Ansible's templating like every other file of the app, and is then read as YAML. It never reaches
-the managed host.
+It lives beside the app's quadlets as application.yml (or application.yaml), and is read the way
+Ansible reads a playbook: as YAML first, and then the values are templated, so a value that is a
+single "{{ expression }}" keeps the type the expression has. It never reaches the managed host.
 """
 
 import re
@@ -16,7 +16,21 @@ from dataclasses import dataclass, field
 import yaml
 
 # pylint: disable=import-error
-from ansible.errors import AnsibleError  # type: ignore[import-not-found]
+from ansible.errors import (  # type: ignore[import-not-found]
+    AnsibleError,
+    AnsibleParserError,
+    AnsibleValueOmittedError,
+)
+from ansible.module_utils.common.validation import (  # type: ignore[import-not-found]
+    check_type_int,
+)
+
+# The parser Ansible's reader uses: the C one when it is installed. PyYAML's own parser refuses tabs
+# the C one accepts, so with it a file Ansible reads as YAML would not be checked as YAML here.
+from ansible.module_utils.common.yaml import SafeLoader  # type: ignore[import-not-found]
+from ansible.module_utils.datatag import native_type_name  # type: ignore[import-not-found]
+from ansible.parsing.utils.yaml import from_yaml  # type: ignore[import-not-found]
+from ansible.template import trust_as_template  # type: ignore[import-not-found]
 
 from ansible_collections.kriansa.quadlet.plugins.module_utils import (  # type: ignore[import-not-found]
     constants,
@@ -33,6 +47,14 @@ SUPPORTED_VERSIONS = ("v1",)
 
 KNOWN_KEYS = ("version", "systemctl_timeout", "main_container", "resource_claims")
 
+# The keys whose values are templated. The version is not one: it says how the rest of the file
+# is read, so it has to be readable before anything is templated. Nor are the keys that are
+# ignored: a variable they use that is not defined would fail the run over a value nothing reads.
+TEMPLATED_KEYS = tuple(key for key in KNOWN_KEYS if key != "version")
+
+# The tag of YAML's merge key, "<<", which brings the keys of another mapping into this one
+MERGE_TAG = "tag:yaml.org,2002:merge"
+
 # Keys starting with one of these are the author's own, and are ignored without a word
 PRIVATE_KEY_PREFIXES = ("x_", "_")
 
@@ -43,12 +65,6 @@ COLLECTION_ROLE_RE = re.compile(r"^\w+(\.\w+){2,}$")
 # A role found on the roles path, by its directory name. It may contain dashes, and dots: a role
 # installed from Galaxy is named author.role, as in geerlingguy.docker
 ROLES_PATH_ROLE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*(\.[A-Za-z0-9_][A-Za-z0-9_-]*)*$")
-
-# How to template a value so YAML reads it back as what it was, whatever it holds
-TEMPLATING_HINT = (
-    "Template values as {{ var | to_json }}, unquoted: it writes any value - a number, a string "
-    "with quotes or backslashes in it, a list - as YAML that reads back as that same value."
-)
 
 
 @dataclass(frozen=True)
@@ -69,40 +85,65 @@ class Manifest:
     warnings: tuple[str, ...] = ()
 
     @classmethod
-    def parse(cls, text: str, path: str) -> "Manifest":
+    def parse(cls, text: str, path: str, templar, keys=TEMPLATED_KEYS) -> "Manifest":
         """
-        Read a manifest from its rendered text.
+        Read a manifest from the file's text, the way Ansible reads a playbook.
+
+        The text is read as YAML by Ansible's own reader, so !unsafe and !vault work as they do in
+        a playbook. Only then are the values templated, each one as a whole: a value that is a
+        single "{{ expression }}" keeps the type of what the expression returns.
 
         Args:
-            text: The file's content, already rendered
+            text: The file's content, as written
             path: Where the file is, for messages
+            templar: A Templar holding every variable the values may use
+            keys: Which of TEMPLATED_KEYS to read. The others keep their defaults, and are never
+                templated: a variable only they use need not be defined.
 
         Raises:
-            AnsibleError: If it is not valid YAML, or breaks a rule of the format. The rendered
-                text is shown on a YAML error: that is what broke, not the file on disk.
+            AnsibleError: If it is not valid YAML, repeats a key, a value cannot be templated, or
+                the file breaks a rule of the format
         """
         try:
-            # A subclass of yaml.SafeLoader, so as safe as yaml.safe_load
-            data = yaml.load(text, Loader=_UniqueKeyLoader)
+            # The C parser only takes plain text, without the markings Ansible adds to what it reads
+            nodes = yaml.compose(str(text), Loader=SafeLoader)
         except yaml.YAMLError as e:
-            # How to template a value has nothing to do with a key written twice
-            hint = "" if isinstance(e, _RepeatedKeyError) else f"\n\n{TEMPLATING_HINT}"
-            # Not chained: Ansible would append the YAML error's message again after the hint
+            nodes, not_yaml = None, e
+        else:
+            not_yaml = None
+        _refuse_repeated_keys(nodes, path)
+
+        try:
+            # Ansible only templates text it has been told is a template rather than data
+            data = from_yaml(trust_as_template(text), file_name=path)
+        except AnsibleParserError as e:
+            # The task's message is all that is shown of the error, so it says where the problem
+            # is: the position Ansible found is only kept on the error, not in its text
+            raise AnsibleError(f"Failed to read {path}{_location(e.obj)}: {e.message}") from e
+
+        # Ansible's reader tries JSON before YAML, so it also reads the little JSON that is not
+        # YAML, such as JSON starting with a tab. Repeated keys are only looked for in YAML, so a
+        # manifest has to be YAML. This comes after Ansible's reader, whose messages explain most
+        # mistakes better.
+        if not_yaml is not None:
             raise AnsibleError(
-                f"{path} is not valid YAML once rendered: {e}\n\n"
-                f"The rendered content:\n{_numbered(text)}{hint}"
-            ) from None
+                f"Failed to read {path}{_mark_location(getattr(not_yaml, 'problem_mark', None))}: "
+                f"{getattr(not_yaml, 'problem', None) or not_yaml}. It reads as JSON but not as "
+                "YAML, and a manifest has to be YAML."
+            )
 
         if data is None:
             data = {}
         if not isinstance(data, dict):
             raise AnsibleError(f"{path} must be a mapping of keys, not {_kind(data)}")
 
+        version = cls._version(data, path)
+        values = _templated(data, path, templar, keys)
         return cls(
-            version=cls._version(data, path),
-            systemctl_timeout=cls._systemctl_timeout(data, path),
-            main_container=cls._main_container(data, path),
-            resource_claims=cls._resource_claims(data, path),
+            version=version,
+            systemctl_timeout=cls._systemctl_timeout(values, path),
+            main_container=cls._main_container(values, path),
+            resource_claims=cls._resource_claims(values, path),
             warnings=cls._unknown_keys(data, path),
         )
 
@@ -114,6 +155,8 @@ class Manifest:
         Reading on with a version it does not know would risk misreading the file - the failure
         the version exists to prevent. And it has no default: an absent version would make a file
         written before versioning and one whose author forgot it look the same.
+
+        It is read as written, never templated: it says how the rest of the file is read.
         """
         if "version" not in data:
             raise AnsibleError(f'{path} has no version. Start it with: version: "v1"')
@@ -126,27 +169,37 @@ class Manifest:
             )
 
         if version.split("/")[0] not in SUPPORTED_VERSIONS:
-            raise AnsibleError(
+            message = (
                 f"Unknown version in {path}: {version!r}. "
                 f"This collection reads {', '.join(SUPPORTED_VERSIONS)}, optionally followed by "
                 '"/" and a variant, such as "v1/testing".'
             )
-        return version
+            if "{{" in version or "{%" in version:
+                message += " The version is never templated: write it out."
+            raise AnsibleError(message)
+        return _plain(version)
 
     @staticmethod
     def _systemctl_timeout(data: dict, path: str) -> int:
+        """
+        A whole number of seconds, read the way Ansible's modules read a number option.
+
+        So text holding a whole number is accepted - as a variable given with -e key=value always
+        is - and so are 900.0, "900.0" and "1e3"; 1.5 is not.
+        """
         value = data.get("systemctl_timeout", constants.DEFAULT_SYSTEMCTL_TIMEOUT)
-        # bool is an int in Python, and YAML reads yes as True
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            message = (
+        try:
+            # bool is an int in Python, and YAML reads yes as True
+            seconds = None if isinstance(value, bool) else int(check_type_int(value))
+        except (TypeError, ValueError, OverflowError):
+            # check_type_int lets the error converting "inf" through, as OverflowError
+            seconds = None
+        if seconds is None or seconds <= 0:
+            raise AnsibleError(
                 f"systemctl_timeout in {path} must be a whole number of seconds above 0, "
                 f"not {_kind(value)} {value!r}"
             )
-            if isinstance(value, str):
-                # A number templated inside quotes reads back as text
-                message += f". {TEMPLATING_HINT}"
-            raise AnsibleError(message)
-        return value
+        return seconds
 
     @staticmethod
     def _main_container(data: dict, path: str) -> str:
@@ -162,7 +215,7 @@ class Manifest:
                 f"main_container in {path} is the quadlet's name without its extension: "
                 f"{stem!r}, not {value!r}"
             )
-        return value
+        return _plain(value)
 
     @staticmethod
     def _resource_claims(data: dict, path: str) -> dict[str, list]:
@@ -187,7 +240,7 @@ class Manifest:
                     f"The claims for {role} in {path} must be a list, not {_kind(role_claims)}. "
                     "Write each claim as an item starting with '- '."
                 )
-        return dict(claims)
+        return _plain(claims)
 
     @staticmethod
     def _unknown_keys(data: dict, path: str) -> tuple[str, ...]:
@@ -227,55 +280,109 @@ def _check_role_name(role, path: str) -> None:
     )
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):  # pylint: disable=too-many-ancestors
+def _refuse_repeated_keys(root, path: str) -> None:
     """
-    YAML's safe loader, refusing a key a mapping repeats.
+    Fail on a key written twice in the same mapping.
 
-    YAML keeps only the last value of a repeated key, and says nothing. In a manifest that drops
-    claims - a role listed twice, the second time inside an {% if %} - and a provider removing
-    what nothing claims would then remove what the dropped claims needed.
+    YAML keeps only the last value of a repeated key, and Ansible's reader only warns about it - or
+    says nothing at all, for a file written as JSON. In a manifest that drops claims: a role listed
+    twice keeps only its second block, and a provider removing what nothing claims would then
+    remove what the first block needed.
+
+    The file is only read as a tree of nodes here, never turned into values, so the tags Ansible
+    adds to YAML, such as !vault, need no support.
     """
-
-
-class _RepeatedKeyError(yaml.constructor.ConstructorError):
-    """A key a mapping repeats - a mistake in the manifest, not in how a value was templated."""
-
-
-# The tag of YAML's merge key, "<<", which brings the keys of another mapping into this one
-MERGE_TAG = "tag:yaml.org,2002:merge"
-
-
-def _construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep=False):
-    seen = set()
-    for key_node, _value_node in node.value:
-        # A merge key is not a key of its own, and the keys it brings in may be overridden here on
-        # purpose: the mapping's construction applies it, after this check
-        if key_node.tag == MERGE_TAG:
+    seen_nodes = set()
+    pending = [root] if root is not None else []
+    while pending:
+        node = pending.pop()
+        # An anchor used twice is the same node, and one may even contain itself
+        if id(node) in seen_nodes:
             continue
-        key = loader.construct_object(key_node, deep=deep)
+        seen_nodes.add(id(node))
+
+        if isinstance(node, yaml.SequenceNode):
+            pending.extend(node.value)
+        elif isinstance(node, yaml.MappingNode):
+            keys = set()
+            for key_node, value_node in node.value:
+                pending.append(value_node)
+                # A merge key is not a key of its own, and the keys it brings in may be
+                # overridden on purpose
+                if key_node.tag == MERGE_TAG or not isinstance(key_node, yaml.ScalarNode):
+                    continue
+                # The tag tells 1 from "1", which are different keys
+                key = (key_node.tag, key_node.value)
+                if key in keys:
+                    raise AnsibleError(
+                        f"Failed to read {path}{_mark_location(key_node.start_mark)}: the key "
+                        f"{key_node.value!r} is written more than once in the same mapping. Only "
+                        "its last value would be kept."
+                    )
+                keys.add(key)
+
+
+def _templated(data: dict, path: str, templar, keys) -> dict:
+    """
+    The values of these keys, templated. A key the file does not have stays out.
+
+    Keys are never templated, as in a playbook: the role a claim is addressed to is named as
+    written.
+    """
+    values = {}
+    for key in keys:
+        if key not in data:
+            continue
         try:
-            repeated = key in seen
-        except TypeError:
-            # A key YAML cannot use either, which the mapping's construction reports
+            values[key] = templar.template(data[key])
+        except AnsibleValueOmittedError:
+            # As in a playbook, a value that is omitted leaves its default in place
             continue
-        if repeated:
-            raise _RepeatedKeyError(
-                "while reading a mapping",
-                node.start_mark,
-                f"found the key {key!r} more than once",
-                key_node.start_mark,
-            )
-        seen.add(key)
-    return loader.construct_mapping(node, deep=deep)
+        except AnsibleError as e:
+            raise AnsibleError(f"Failed to template {key} in {path}: {e}") from e
+    return values
 
 
-_UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
-)
+def _plain(value):
+    """
+    The value as plain Python types, without the markings Ansible's reader adds to it.
+
+    Ansible marks every string its reader returns as a template it may render. What is left of
+    those marks after templating - on keys, on the version, on text with nothing to render -
+    would let whoever reads the result later render that text again, with their own variables.
+    """
+    if isinstance(value, dict):
+        return {_plain(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    if isinstance(value, str):
+        return str(value)
+    return value
+
+
+def _location(origin) -> str:
+    """
+    Where in the file a YAML error is, as words to follow the file's path.
+
+    Ansible tags the error with the position it found, but the task's message, built from the
+    error's text alone, would lose it.
+    """
+    line = getattr(origin, "line_num", None)
+    if line is None:
+        return ""
+    column = getattr(origin, "col_num", None)
+    return f", at line {line}" if column is None else f", at line {line} column {column}"
+
+
+def _mark_location(mark) -> str:
+    """The same words for a position PyYAML found, which counts lines and columns from 0."""
+    if mark is None:
+        return ""
+    return f", at line {mark.line + 1} column {mark.column + 1}"
 
 
 def _kind(value) -> str:
-    """How a value reads in a message: what YAML made of it."""
+    """How a value reads in a message: what YAML, or the template, made of it."""
     if value is None:
         return "nothing"
     if isinstance(value, bool):
@@ -290,11 +397,6 @@ def _kind(value) -> str:
         return "a list"
     if isinstance(value, dict):
         return "a mapping"
-    return type(value).__name__
-
-
-def _numbered(text: str) -> str:
-    """The text with line numbers, which YAML's error messages refer to."""
-    lines = text.split("\n")
-    width = len(str(len(lines)))
-    return "\n".join(f"{number:>{width}} | {line}" for number, line in enumerate(lines, start=1))
+    # Not type(value).__name__: Ansible's reader returns its own subclasses, whose internal names
+    # say nothing to the user
+    return native_type_name(value)

@@ -123,7 +123,9 @@ class ActionModule(QuadletAction):  # pylint: disable=too-few-public-methods
         """
         manifest = self._task.args.get("_manifest")
         if manifest is None:
-            parsed = app.manifest()
+            # Only what the module needs: the claims are for the quadlet_stack role's providers,
+            # and templating them here would fail the deploy over a variable only they use
+            parsed = app.manifest(keys=("systemctl_timeout", "main_container"))
             for warning in parsed.warnings:
                 display.warning(warning)
             return parsed.systemctl_timeout, parsed.main_container

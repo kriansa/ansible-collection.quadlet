@@ -448,12 +448,13 @@ resource_claims: {}
 after a `/` is a variant tag, so `v1/testing` reads as `v1`. A key the manifest does not define
 warns, unless it starts with `x_` or `_`.
 
-The manifest is templated like every other file of the app, `quadlet_app_name` included, then read
-as YAML, and never reaches the host. Template values as `{{ var | to_json }}`, unquoted: a value
-written plainly is read as whatever YAML makes of it - `yes` becomes a boolean, one containing `: `
-breaks the file - and one put inside quotes loses its backslashes, or becomes text where a number
-was meant. When the file does not parse, the error shows the rendered text. The
-[quadlet_stack documentation](QUADLET_STACK.md#the-manifest) has the full rules.
+Unlike the app's other files, the manifest is read the way Ansible reads a playbook: as YAML first,
+and then its values are templated, `quadlet_app_name` included. Quote a value that starts with
+`{{`, as in a playbook - `systemctl_timeout: "{{ app_timeout }}"` - and a value that is a single
+expression keeps the type of what it returns. Keys and `version` are never templated, and run on its
+own, quadlet_app reads only `systemctl_timeout` and `main_container`: the claims are never
+templated, so a variable only they use need not be defined. The manifest never reaches the host.
+The [quadlet_stack documentation](QUADLET_STACK.md#templating) has the full rules.
 
 `systemctl_timeout` bounds how long **Ansible** waits for each `systemctl` command - `start`,
 `restart` and `daemon-reload` alike. It is not a systemd timeout, and raising it does nothing for
@@ -464,6 +465,11 @@ the others:
 | `systemctl_timeout` | how long Ansible waits for `systemctl` to return | the manifest |
 | `TimeoutStartSec=` / `TimeoutStopSec=` | how long systemd waits before failing the unit | the quadlet's `[Service]` |
 | `StopTimeout=` | how long podman waits before killing the container | the quadlet's `[Container]` |
+
+It is a whole number of seconds above 0, read the way Ansible's modules read a number option: `900`,
+`"900"`, `900.0`, `"900.0"` and `"9e2"` all read as `900`, so a variable given with `-e key=value`,
+which is text, or a division such as `{{ 1800 / 2 }}`, which gives a fraction, can set it. `1.5`
+fails the run.
 
 ### States
 

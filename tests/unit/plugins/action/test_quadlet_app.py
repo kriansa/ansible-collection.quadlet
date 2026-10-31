@@ -400,10 +400,17 @@ def test_decode_error_message(playbook_dir, monkeypatch):
 
 
 class TestManifest:
-    def test_read_from_the_app_and_rendered(self, playbook_dir):
+    def test_claims_are_left_to_the_stack(self, playbook_dir):
+        # Only the quadlet_stack role's providers read them, with variables quadlet_app need not have
+        manifest = 'version: "v1"\nresource_claims:\n  dns:\n    - name: "{{ undefined_var }}"\n'
+        run = deploy(playbook_dir, {**MAIN, "application.yml": manifest})
+        assert "failed" not in run.result, run.result
+        assert run.module_args["_systemctl_timeout"] == 300
+
+    def test_read_from_the_app_and_templated(self, playbook_dir):
         manifest = (
             'version: "v1"\n'
-            "systemctl_timeout: {{ timeout }}\n"
+            'systemctl_timeout: "{{ timeout }}"\n'
             'main_container: "{{ quadlet_app_name }}-web"\n'
         )
         run = deploy(

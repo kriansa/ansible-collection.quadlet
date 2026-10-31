@@ -120,11 +120,11 @@ main_container: main
 # Optional. What the app needs from outside itself, by the role that provides it.
 resource_claims:
   kriansa.commons.quadlet_provider.example_dns:
-    - name: {{ (quadlet_app_name ~ '.' ~ public_dns_search) | to_json }}
-      value: {{ public_ip | to_json }}
+    - name: "{{ quadlet_app_name }}.{{ public_dns_search }}"
+      value: "{{ public_ip }}"
   caddy-ingress:
-    - domain: {{ (quadlet_app_name ~ '.' ~ public_dns_search) | to_json }}
-      upstream: {{ (quadlet_app_name ~ '--main:8080') | to_json }}
+    - domain: "{{ quadlet_app_name }}.{{ public_dns_search }}"
+      upstream: "{{ quadlet_app_name }}--main:8080"
 ```
 
 See [quadlet_app's manifest section](QUADLET_APP.md#manifest) for what `systemctl_timeout` does and
@@ -135,7 +135,8 @@ does not bound.
 `version` is required, and is a **string**: YAML reads `1` as a number and `1.0` as a fraction.
 Everything before the first `/` is the version the file is read as; the rest is a variant tag, so
 `v1/testing-new-thing` reads as `v1`. A version this collection does not know fails the run rather
-than risk misreading the file.
+than risk misreading the file. It is never templated - it says how the rest of the file is read - so
+write it out.
 
 ### Unknown keys
 
@@ -145,36 +146,61 @@ without a word.
 
 ### Templating
 
-The manifest is templated with everything the play sees - variables, lookups, filters, `{% %}`
-blocks - and `quadlet_app_name`, exactly like the app's other files. It is **rendered, then read as
-YAML**. It never reaches the managed host.
+The manifest is read **the way Ansible reads a playbook**: as YAML first, by Ansible's own reader,
+and then each value is templated with everything the play sees - variables, lookups, filters - and
+`quadlet_app_name`. It never reaches the managed host.
 
-It is rendered **once**, by the collect step. The deploy uses that result rather than rendering the
+```yaml
+resource_claims:
+  caddy-ingress:
+    - domain: "{{ quadlet_app_name }}.{{ public_dns_search }}"  # text around expressions
+      port: "{{ app_port }}"                                    # a number stays a number
+      aliases: "{{ extra_domains }}"                            # a list stays a list
+  dns: "{{ dns_claims }}"                                       # so can a whole list of claims
+```
+
+What that means in practice is what it means in a playbook:
+
+- **Quote a value that starts with `{{`.** Unquoted, YAML reads the braces as a mapping and the run
+  fails, naming the line.
+- **A value that is a single expression keeps the type of what it returns**: a number, a boolean, a
+  list, a mapping, or text that YAML would have misread - `yes`, `1.0`, `a: b`, `C:\temp\new` all
+  arrive as the text they are.
+- **Keys are never templated.** The role a claim is addressed to is named as written.
+- **`{% %}` works inside a value, not around lines.** A claim that depends on a condition, or one
+  per item of a list, is written as an expression returning the list or mapping:
+  `ingress: "{{ [public_claim] if public else [] }}"`.
+- **A value that resolves to `omit` leaves the key's default**, as `{{ t | default(omit) }}` does for
+  a module option.
+- `!unsafe` keeps a value from being templated, and `!vault` values are decrypted, as in a
+  playbook - see the note on secrets below.
+- **Anchors and merge keys (`<<: *base`) work, and a shared value is templated at each place it is
+  used**, as in a playbook: a `lookup()` in it runs once per use, and `random()` or `now()` give
+  each use its own value. Overriding a key a merge brings in is allowed, though Ansible's YAML reader
+  warns about it, as it does in a playbook - or fails the run, with `DUPLICATE_YAML_DICT_KEY=error`.
+
+Unlike a playbook, **a key written twice in the same mapping fails the run**, naming the line,
+whatever Ansible's `DUPLICATE_YAML_DICT_KEY` says. YAML would keep only the last value: for a role
+listed twice, its first claims would be lost, and a provider removing what nothing claims would
+remove what they needed.
+
+Only the keys the manifest uses are templated: `version` is read as written, and a key it ignores -
+unknown, or your own `x_` one - is never templated, so a variable it names need not be defined.
+`quadlet_app` run on its own reads `systemctl_timeout` and `main_container` only, and never
+templates the claims. What the manifest returns is plain data: nothing in it - a key, the version,
+text a value rendered to - is templated again by whoever reads it later.
+
+When the file is not valid YAML, the error names the line and column. When a value cannot be
+templated, it names the key it belongs to.
+
+The collect step templates the manifest, and the deploy uses that result rather than templating the
 file again with other variables in scope, so the values the providers were given are the ones the
 app is deployed with.
 
-**Template values as `{{ var | to_json }}`, unquoted.** Rendering happens before YAML reads the
-file, so YAML reads whatever a value renders to - the braces are long gone by then:
-
-| Written as | `var` holds | YAML reads |
-|---|---|---|
-| `key: {{ var }}` | `yes` | **`True`** - a boolean, silently |
-| `key: {{ var }}` | `1.0` | **`1.0`** - a number, silently |
-| `key: {{ var }}` | text with `: `, or starting with `*` or `%` | the run fails |
-| `key: "{{ var }}"` | `900`, for `systemctl_timeout` | **`"900"`** - text, so the run fails |
-| `key: "{{ var }}"` | `C:\temp\new` | **a tab and a newline** in place of `\t` and `\n`, silently |
-| `key: {{ var \| to_json }}` | any of these | ✅ that same value |
-
-JSON is YAML, and `to_json` escapes whatever needs it, so the value reads back as the type and text
-it was: a number stays a number, a string with quotes, backslashes or newlines stays that string,
-and a list stays a list. When the file does not parse, the error shows the rendered text, which is
-what broke; the file on disk looks fine.
-
-A literal value, not templated, is written as in any YAML file. Single-quoted scalars process no
-escapes, which suits regular expressions: `\d` survives.
-
 **Manifests are not a place for secrets.** Claims are part of what the role registers and shows with
-`-v`, and a parse error prints the rendered file.
+`-v`, and every provider receives every app's claims. A `!vault` value is decrypted, and then shown
+like any other - as a vaulted task argument is without `no_log`. Keep secrets in the provider's own
+variables.
 
 ## Resource claims
 

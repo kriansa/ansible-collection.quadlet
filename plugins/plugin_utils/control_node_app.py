@@ -2,8 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""An app's directory as the control node sees it: its files, rendered with Ansible's templating."""
+"""
+An app's directory as the control node sees it: its files rendered with Ansible's templating, and
+its manifest read the way Ansible reads a playbook.
+"""
 
+import functools
 import os
 
 # pylint: disable=import-error
@@ -23,6 +27,7 @@ from ansible_collections.kriansa.quadlet.plugins.module_utils.sources import (  
 )
 from ansible_collections.kriansa.quadlet.plugins.plugin_utils.manifest import (  # type: ignore[import-not-found]
     MANIFEST_FILENAMES,
+    TEMPLATED_KEYS,
     Manifest,
 )
 
@@ -38,7 +43,8 @@ class ControlNodeApp:
     An app directory on the control node.
 
     Every file is rendered with Ansible's full templating - variables, lookups, filters, control
-    flow - plus `quadlet_app_name`, the name the app is deployed under.
+    flow - plus `quadlet_app_name`, the name the app is deployed under. The manifest is read the
+    way a playbook is instead: as YAML first, and then its values are templated.
     """
 
     def __init__(self, path: str, name: str, loader, templar):
@@ -72,17 +78,21 @@ class ControlNodeApp:
             )
         return found[0] if found else None
 
-    def manifest(self) -> Manifest:
+    def manifest(self, keys=TEMPLATED_KEYS) -> Manifest:
         """
-        The app's manifest, rendered and read; the defaults if it has none.
+        The app's manifest, read as YAML and then templated; the defaults if it has none.
+
+        Args:
+            keys: Which of the manifest's keys to read, besides its version. The others keep
+                their defaults, and are never templated.
 
         Raises:
-            AnsibleError: If it cannot be rendered, or is not a valid manifest
+            AnsibleError: If it cannot be read or templated, or is not a valid manifest
         """
         path = self.manifest_path()
         if path is None:
             return Manifest()
-        return Manifest.parse(self.render(path), path)
+        return Manifest.parse(self._read_text(path), path, self._app_templar, keys)
 
     def model(self, main_container: str) -> QuadletApp:
         """
@@ -172,26 +182,15 @@ class ControlNodeApp:
 
     def render(self, file_path: str) -> str:
         """Read a file and render it with Ansible's full templating engine."""
+        # Read outside the try: its errors already name the file
+        file_content = self._read_text(file_path)
         try:
-            file_content = self._loader.get_text_file_contents(file_path)
-
-            # The loader does not refuse a file that is not UTF-8: it only warns, and hands over
-            # the text with each bad byte replaced by a placeholder character that cannot be
-            # written out again. Turning the placeholders back into the original bytes and
-            # decoding those strictly raises the error the loader held back, naming the first bad
-            # byte, before anything reaches the host.
-            file_content.encode("utf-8", "surrogateescape").decode("utf-8")
-
             # Ansible only renders text it has been told is a template rather than data
             trusted_content = trust_as_template(file_content)
 
-            temp_vars = self._templar.available_variables.copy()
-            temp_vars["quadlet_app_name"] = self.name
-            data_templar = self._templar.copy_with_new_env(available_variables=temp_vars)
-
             # escape_backslashes=False prevents double-escaping in files, and
             # preserve_trailing_newlines=True keeps file formatting intact
-            templated_content = data_templar.template(
+            templated_content = self._app_templar.template(
                 trusted_content,
                 escape_backslashes=False,
                 preserve_trailing_newlines=True,
@@ -204,10 +203,43 @@ class ControlNodeApp:
                 return ""
             return to_text(templated_content, nonstring="simplerepr")
 
-        except UnicodeDecodeError as e:
-            raise AnsibleError(f"File {file_path} is not valid UTF-8: {e}") from e
         except Exception as e:
             raise AnsibleError(f"Failed to template file {file_path}: {e}") from e
+
+    def _read_text(self, file_path: str) -> str:
+        """
+        A file's text, decrypted if it is vaulted.
+
+        Raises:
+            AnsibleError: If the file cannot be read or decrypted, or is not UTF-8 - naming it, as
+                the loader's own errors do not
+        """
+        try:
+            file_content = self._loader.get_text_file_contents(file_path)
+
+            # The loader does not refuse a file that is not UTF-8: it only warns, and hands over
+            # the text with each bad byte replaced by a placeholder character that cannot be
+            # written out again. Turning the placeholders back into the original bytes and
+            # decoding those strictly raises the error the loader held back, naming the first bad
+            # byte, before anything reaches the host.
+            file_content.encode("utf-8", "surrogateescape").decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise AnsibleError(f"File {file_path} is not valid UTF-8: {e}") from e
+        except AnsibleError as e:
+            raise AnsibleError(f"Failed to read {file_path}: {e}") from e
+        return file_content
+
+    @functools.cached_property
+    def _app_templar(self):
+        """
+        The task's templar, with `quadlet_app_name` added to the variables it sees.
+
+        Built once for the app: every file of it renders with the same variables, and a fresh
+        templar would load again the templates its files import.
+        """
+        variables = self._templar.available_variables.copy()
+        variables["quadlet_app_name"] = self.name
+        return self._templar.copy_with_new_env(available_variables=variables)
 
     def _quadlet_files(
         self, quadlets_dir: str, extensions: tuple[str, ...] = constants.VALID_QUADLET_EXTENSIONS
