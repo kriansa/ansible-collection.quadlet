@@ -1,7 +1,7 @@
 ---
-# Nothing in this role sets tags. The tags a caller gives with `apply:` reach every task here, and
-# every task of the files and roles it includes: a task under a dynamic include takes its tags from
-# whatever contains the include.
+# Nothing in this role sets tags. The tags a caller gives the import (or `apply:`, on an include)
+# reach every task here, and every task of the files and roles it includes: a task under a dynamic
+# include takes its tags from whatever contains the include.
 
 # Argument specs check a value's type without converting it, so a single name given as a string
 # would pass them - and then be read letter by letter

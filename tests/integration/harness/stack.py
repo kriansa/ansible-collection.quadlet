@@ -113,17 +113,15 @@ class Stack:
 
         Args:
             deploy_only: The apps to deploy, by name; all of them when None
-            tags: Run with --tags, given to the role with `apply:` as a playbook would
+            tags: Run with --tags, given to the role's import as a playbook would
         """
-        include: dict[str, Any] = {"name": "kriansa.quadlet.quadlet_stack"}
         task: dict[str, Any] = {
             "name": STACK_TASK,
-            "ansible.builtin.include_role": include,
+            "ansible.builtin.import_role": {"name": "kriansa.quadlet.quadlet_stack"},
             "vars": {"quadlet_stack_deploy_only": deploy_only or [], "quadlet_stack_state": state},
         }
         extra_args = None
         if tags:
-            include["apply"] = {"tags": tags}
             task["tags"] = tags
             extra_args = ["--tags", ",".join(tags)]
 

@@ -90,7 +90,7 @@ class TestProviders:
         second.write("quadlets/main.container", container())
         claims(second, "claim-c")
 
-        # The tags a playbook gives with apply: reach every task the role includes, the
+        # The tags a playbook gives the import reach every task the role includes, the
         # provider's among them
         run = stack.deploy(deploy_only=[first.name], tags=["custom"])
 

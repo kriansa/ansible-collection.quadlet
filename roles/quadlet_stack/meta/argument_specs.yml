@@ -10,8 +10,9 @@ argument_specs:
         is included once before the deploy and once after it, with C(quadlet_hook) set to
         C(before) or C(after), C(quadlet_claims) holding every claim addressed to it, and
         C(quadlet_stack) holding everything quadlet_stack_info read.
-      - Include it with M(ansible.builtin.include_role) and C(apply) for any tags you run it under,
-        so they reach the tasks it includes in turn.
+      - Import it with M(ansible.builtin.import_role), so the tags and keywords such as C(become)
+        given to the import reach every task of the role, and the tasks it includes in turn. With
+        M(ansible.builtin.include_role), repeat them under C(apply).
     options:
       quadlet_stack_src:
         description:

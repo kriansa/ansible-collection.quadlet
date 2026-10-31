@@ -44,10 +44,8 @@ satisfied by provider roles before and after - use the `quadlet_stack` role:
 
 ```yaml
 - name: Deploy the apps
-  ansible.builtin.include_role:
+  ansible.builtin.import_role:
     name: kriansa.quadlet.quadlet_stack
-    apply:
-      tags: [deploy]
   vars:
     quadlet_stack_state: started
   tags: [deploy]

@@ -26,10 +26,8 @@ quadlet-apps/
 
 ```yaml
 - name: Deploy the apps
-  ansible.builtin.include_role:
+  ansible.builtin.import_role:
     name: kriansa.quadlet.quadlet_stack
-    apply:
-      tags: [deploy]
   vars:
     quadlet_stack_deploy_only: "{{ [app] if app is defined else [] }}"
     quadlet_stack_state: started
@@ -42,10 +40,15 @@ quadlet-apps/
 | `quadlet_stack_deploy_only` | `[]` | The apps to deploy, by name. Empty deploys every app |
 | `quadlet_stack_state` | `installed` | `installed`, `started` or `restarted`, as for `quadlet_app` |
 
-Include it with `include_role` and `apply:` for the tags you run it under. Tags on a dynamic include
-apply to the include task alone; `apply` is what gives them to the role's tasks, and through them to
-everything the role includes - provider roles too. The role sets no tags of its own, so any tag
-works.
+Import it with `import_role`. The tags and keywords such as `become` given to the import reach every
+task of the role, and through them everything the role includes - provider roles and their handlers
+too. The role sets no tags of its own, so any tag works.
+
+`include_role` works as well, with `apply:` repeating the tags and keywords: on an include they
+reach the include task alone, and `apply` is what gives them to the role's tasks. Use it only to
+run the role under a `when:` decided once. An import copies its `when:` onto every task of the role
+and checks it before each one, so a condition the role or a provider changes would stop the deploy
+partway.
 
 Every directory under `quadlet_stack_src` whose name does not start with `.` is an app. It must have
 a `quadlets/` directory and a lowercase name, since it is deployed under that name. Creating a
