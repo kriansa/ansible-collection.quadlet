@@ -420,7 +420,7 @@ journalctl -u myapp--backup.service         # what happened when it did
 |-----------|----------|---------|-------------|
 | `src` | Yes | - | Path to application directory |
 | `name` | No | basename of src | Application name (lowercase, letters/numbers/hyphens/underscores) |
-| `state` | No | `installed` | Deployment state: `installed`, `started`, `restarted` |
+| `state` | No | `started` | Deployment state: `installed`, `started`, `restarted` |
 | `force` | No | `false` | Force redeployment even if files haven't changed |
 | `settle_time` | No | `5` | Seconds the services a run started must stay up before the task succeeds; `0` turns the check off. See [Startup check](#startup-check) |
 
@@ -468,7 +468,7 @@ the others:
 ### States
 
 - **installed**: Deploy files and reload systemd, but don't manage service state. Nothing running is restarted, including the [volume ownership bootstrap](#what-gets-generated)
-- **started**: Deploy files and ensure the main service is running. If files changed, restarts all app-prefixed dependencies and the main service, which starts any that are not running
+- **started** (the default): Deploy files and ensure the main service is running. If files changed, restarts all app-prefixed dependencies and the main service, which starts any that are not running
 - **restarted**: Deploy files and restart all app-prefixed dependencies and the main service
 
 These describe the main service only. Timers are enabled and started under every state — see

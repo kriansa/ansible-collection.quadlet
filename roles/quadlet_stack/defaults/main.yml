@@ -8,4 +8,4 @@ quadlet_stack_deploy_only: []
 
 # What to do with each deployed app's services: installed, started or restarted, as for
 # kriansa.quadlet.quadlet_app
-quadlet_stack_state: installed
+quadlet_stack_state: started

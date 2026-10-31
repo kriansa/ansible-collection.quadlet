@@ -57,7 +57,7 @@ options:
         required: false
         type: str
         choices: ['installed', 'started', 'restarted']
-        default: installed
+        default: started
     force:
         description:
             - Force overwrite files even if content hasn't changed
@@ -118,18 +118,17 @@ notes:
 """
 
 EXAMPLES = r"""
-# Deploy application with default settings
+# Deploy and start application with default settings
 - name: Deploy simple web app
   kriansa.quadlet.quadlet_app:
     src: podman-apps/nginx
-    state: installed
 
-# Deploy and start application with custom name
+# Deploy application under a custom name, without starting or restarting anything
 - name: Deploy backend application
   kriansa.quadlet.quadlet_app:
     src: podman-apps/backend
     name: prod-backend
-    state: started
+    state: installed
 
 # Deploy with variables for templating
 - name: Deploy database
@@ -212,7 +211,7 @@ def main():
             "name": {"type": "str", "required": False},
             "state": {
                 "type": "str",
-                "default": "installed",
+                "default": "started",
                 "choices": ["installed", "started", "restarted"],
             },
             "force": {"type": "bool", "default": False},

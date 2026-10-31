@@ -54,7 +54,7 @@ def test_defaults(capsys, captured_params):
     assert captured_params == {
         "src": "/apps/app",
         "name": None,
-        "state": "installed",
+        "state": "started",
         "force": False,
         "settle_time": 5,
         "_systemctl_timeout": 300,

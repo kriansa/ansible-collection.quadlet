@@ -30,7 +30,6 @@ quadlet-apps/
     name: kriansa.quadlet.quadlet_stack
   vars:
     quadlet_stack_deploy_only: "{{ [app] if app is defined else [] }}"
-    quadlet_stack_state: started
   tags: [deploy]
 ```
 
@@ -38,7 +37,7 @@ quadlet-apps/
 |---|---|---|
 | `quadlet_stack_src` | `quadlet-apps` | The directory holding one directory per app, relative to the playbook |
 | `quadlet_stack_deploy_only` | `[]` | The apps to deploy, by name. Empty deploys every app |
-| `quadlet_stack_state` | `installed` | `installed`, `started` or `restarted`, as for `quadlet_app` |
+| `quadlet_stack_state` | `started` | `installed`, `started` or `restarted`, as for `quadlet_app` |
 
 Import it with `import_role`. The tags and keywords such as `become` given to the import reach every
 task of the role, and through them everything the role includes - provider roles and their handlers

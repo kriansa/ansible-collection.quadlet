@@ -33,7 +33,6 @@ It needs ansible-core 2.19 or later.
 - name: Deploy application
   kriansa.quadlet.quadlet_app:
     src: apps/myapp
-    state: started
 ```
 
 See the [quadlet_app documentation](docs/QUADLET_APP.md) for the directory layout, what the module
@@ -46,8 +45,6 @@ satisfied by provider roles before and after - use the `quadlet_stack` role:
 - name: Deploy the apps
   ansible.builtin.import_role:
     name: kriansa.quadlet.quadlet_stack
-  vars:
-    quadlet_stack_state: started
   tags: [deploy]
 ```
 

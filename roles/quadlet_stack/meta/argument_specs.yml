@@ -34,4 +34,4 @@ argument_specs:
             O(kriansa.quadlet.quadlet_app#module:state) does.
         type: str
         choices: [installed, started, restarted]
-        default: installed
+        default: started
