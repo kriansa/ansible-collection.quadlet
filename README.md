@@ -39,6 +39,22 @@ It needs ansible-core 2.19 or later.
 See the [quadlet_app documentation](docs/QUADLET_APP.md) for the directory layout, what the module
 does to each file, and every option.
 
+To deploy every app of a host together - their networks first, and the resources they claim
+satisfied by provider roles before and after - use the `quadlet_stack` role:
+
+```yaml
+- name: Deploy the apps
+  ansible.builtin.include_role:
+    name: kriansa.quadlet.quadlet_stack
+    apply:
+      tags: [deploy]
+  vars:
+    quadlet_stack_state: started
+  tags: [deploy]
+```
+
+See the [quadlet_stack documentation](docs/QUADLET_STACK.md).
+
 ## Development
 
 The tests run under pytest, in an environment managed by [uv](https://docs.astral.sh/uv/). See

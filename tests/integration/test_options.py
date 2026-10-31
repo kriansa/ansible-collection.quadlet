@@ -1,4 +1,4 @@
-"""I. Module options and task keywords: force, systemctl_timeout, become, async, loops."""
+"""I. Module options and task keywords: force, the manifest's timeout, become, async, loops."""
 
 import time
 
@@ -42,8 +42,9 @@ def test_force_rewrites_and_restarts_without_changes(make_app, host):
 def test_systemctl_timeout(make_app, host):
     app = make_app("timeout")
     app.write("quadlets/main.container", main() + "\n[Service]\nExecStartPre=/usr/bin/sleep 15\n")
+    app.write("application.yml", 'version: "v1"\nsystemctl_timeout: 3\n')
 
-    step = app.deploy("started", args={"systemctl_timeout": 3})
+    step = app.deploy("started")
 
     assert step.failed
     assert step.msg == f"systemctl restart {app.service('main')} timed out after 3s"
@@ -54,7 +55,7 @@ def test_systemctl_timeout(make_app, host):
     assert host.active_state(app.service("main")) == "active"
 
     # Nothing changed and main is running now, so the next run has nothing to do
-    assert not app.deploy("started", args={"systemctl_timeout": 3}).changed
+    assert not app.deploy("started").changed
 
 
 def test_without_become(make_app, host):

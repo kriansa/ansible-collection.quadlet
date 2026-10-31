@@ -5,6 +5,9 @@
 # pylint: disable=import-error
 from ansible.module_utils.basic import AnsibleModule  # type: ignore[import-not-found]
 
+from ansible_collections.kriansa.quadlet.plugins.module_utils import (  # type: ignore[import-not-found]
+    constants,
+)
 from ansible_collections.kriansa.quadlet.plugins.module_utils.app_module import (  # type: ignore[import-not-found]
     QuadletAppModule,
 )
@@ -30,7 +33,9 @@ options:
         description:
             - Path to the application directory containing quadlets/, units/, init/, config/
             - Can be relative to playbook directory or absolute path
-            - Must contain quadlets/main.container (required)
+            - Must contain the app's main quadlet, quadlets/main.container unless the app's
+              manifest names another
+            - May contain a manifest, application.yml or application.yaml, describing the app
         required: true
         type: path
     name:
@@ -60,13 +65,6 @@ options:
         required: false
         type: bool
         default: false
-    systemctl_timeout:
-        description:
-            - Timeout in seconds for systemctl commands (start, stop, restart, daemon-reload)
-            - Increase this for services that take a long time to start (e.g., large image pulls)
-        required: false
-        type: int
-        default: 120
     settle_time:
         description:
             - Seconds the services this run started have to stay up before the task succeeds
@@ -90,7 +88,17 @@ requirements:
 notes:
     - This module requires root privileges or appropriate systemd user permissions
     - Quadlet files must be in quadlets/ subdirectory
-    - At least quadlets/main.container must exist
+    - A file name in quadlets/ or units/ cannot contain "--", which separates the app's name from
+      its files' names once deployed. Template quadlets, whose name has an @, are not supported.
+    - The app's main quadlet must exist. It is quadlets/main.container, .pod or .kube, unless the
+      manifest's main_container names another; its service is the one C(state) applies to.
+      Several quadlets of that name - a container and a pod, say - fail the task.
+    - The module starts the main service and restarts what it depends on, and leaves the rest to
+      systemd. Every other container, pod and kube file of the app must be linked to main, by
+      Requires= or Wants=, or run by a timer; the task warns about one that is not.
+    - How long the module waits for each systemctl command is the manifest's systemctl_timeout,
+      300 seconds unless set. It bounds Ansible's wait only - systemd's own start and stop
+      timeouts are set in the quadlet.
     - init and config subdirectories must end with .container or .pod
     - All files are automatically templated by Ansible before module receives them
     - Named volumes are mounted idmapped and chowned once by a generated bootstrap unit, rather
@@ -139,12 +147,15 @@ EXAMPLES = r"""
     state: restarted
     force: true
 
-# Deploy service with extended timeout for slow image pulls
+# Deploy service with extended timeout for slow image pulls. The timeout is a fact about the app,
+# so it is set in podman-apps/unifi-network/application.yml rather than here:
+#
+#   version: v1
+#   systemctl_timeout: 900
 - name: Deploy application with custom timeout
   kriansa.quadlet.quadlet_app:
     src: podman-apps/unifi-network
     state: started
-    systemctl_timeout: 300
 
 # An app with a scheduled job. quadlets/backup.container runs it, units/backup.timer schedules it,
 # and the timer is enabled and started regardless of the state requested here.
@@ -168,18 +179,23 @@ application_name:
 service_name:
     description: The main systemd service name
     type: str
-    returned: always
+    returned: except in the quadlet_stack role's networks pass
     sample: "my-backend-app--main.service"
 quadlet_files:
     description: List of quadlet files deployed to /etc/containers/systemd
     type: list
-    returned: always
+    returned: except in the quadlet_stack role's networks pass
     sample: ["my-app--main.container", "my-app--db.container", "my-app--data.volume"]
 unit_files:
     description: List of plain systemd units deployed to /etc/systemd/system
     type: list
-    returned: always
+    returned: except in the quadlet_stack role's networks pass
     sample: ["my-app--backup.timer"]
+network_files:
+    description: The app's network quadlets, in the pass the quadlet_stack role makes to create them
+    type: list
+    returned: only in the quadlet_stack role's networks pass
+    sample: ["my-app--main.network"]
 msg:
     description: Human-readable message about the operation
     type: str
@@ -200,9 +216,13 @@ def main():
                 "choices": ["installed", "started", "restarted"],
             },
             "force": {"type": "bool", "default": False},
-            "systemctl_timeout": {"type": "int", "default": 120},
             "settle_time": {"type": "int", "default": 5},
             # Internal parameters used by action plugin
+            # Read from the app's manifest: how long systemctl may take, and the main quadlet
+            "_systemctl_timeout": {"type": "int", "default": constants.DEFAULT_SYSTEMCTL_TIMEOUT},
+            "_main_container": {"type": "str", "default": constants.DEFAULT_MAIN_CONTAINER},
+            # Set by the quadlet_stack role, to create the app's missing networks and nothing else
+            "_networks_only": {"type": "bool", "default": False},
             "_control_node_processed": {"type": "bool", "default": False, "required": False},
             # Which files the app has: kind, and name or container directory and path. Logged.
             "_files": {"type": "list", "elements": "dict", "required": False},

@@ -152,24 +152,10 @@ class TestCheckLayout:
     def test_present(self, valid_app):
         AppDirectory(str(valid_app)).check_layout()
 
-    def test_main_container_missing(self, tmp_path):
+    def test_the_main_quadlet_is_not_its_concern(self, tmp_path):
+        # The app checks it has its main quadlet, whichever way its files arrived
         app = make_app(tmp_path / "app", files=["quadlets/db.container"])
-        with pytest.raises(
-            QuadletAppError,
-            match="Required file not found: .*/quadlets/main.container. "
-            "The quadlets/main.container file is mandatory.",
-        ):
-            AppDirectory(str(app)).check_layout()
-
-    def test_main_container_is_a_directory(self, tmp_path):
-        app = make_app(tmp_path / "app", dirs=["quadlets/main.container"])
-        with pytest.raises(QuadletAppError, match="Required file not found"):
-            AppDirectory(str(app)).check_layout()
-
-    def test_main_pod_does_not_count(self, tmp_path):
-        app = make_app(tmp_path / "app", files=["quadlets/main.pod"])
-        with pytest.raises(QuadletAppError, match="Required file not found"):
-            AppDirectory(str(app)).check_layout()
+        AppDirectory(str(app)).check_layout()
 
     @pytest.mark.parametrize("kind", ["init", "config"])
     def test_kind_as_a_file_is_skipped(self, valid_app, kind):

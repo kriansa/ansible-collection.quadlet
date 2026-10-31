@@ -56,8 +56,10 @@ def test_defaults(capsys, captured_params):
         "name": None,
         "state": "installed",
         "force": False,
-        "systemctl_timeout": 120,
         "settle_time": 5,
+        "_systemctl_timeout": 300,
+        "_main_container": "main",
+        "_networks_only": False,
         "_control_node_processed": False,
         "_files": None,
         "_contents": None,
@@ -161,5 +163,6 @@ def test_examples_and_return_are_valid_yaml():
         "service_name",
         "quadlet_files",
         "unit_files",
+        "network_files",
         "msg",
     }

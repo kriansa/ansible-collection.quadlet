@@ -21,17 +21,15 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
-        "agent--gpu-exporter.service",
-        "agent--main.service",
-        "agent--probe.service"
+        "LoadState",
+        "agent--main.service"
       ],
       "timeout": 10
     },
@@ -49,11 +47,23 @@
     {
       "argv": [
         "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "agent--gpu-exporter.service",
+        "agent--main.service",
+        "agent--probe.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "agent--state-volume-init.service",
         "agent--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

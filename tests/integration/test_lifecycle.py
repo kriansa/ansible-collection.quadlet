@@ -209,6 +209,9 @@ def test_file_with_windows_line_endings(make_app, host):
         in host.container_exec(app.container("main"), "grep ' /data ' /proc/self/mountinfo").stdout
     )
 
+    # The deployed file keeps its line endings, and matches them on the next run
+    assert not app.deploy("started").changed
+
 
 def test_comments_above_the_first_header_are_kept(make_app, host):
     app = make_app("comments")

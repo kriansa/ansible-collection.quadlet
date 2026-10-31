@@ -76,6 +76,39 @@ class UnitFile:
             if directive is not None and key in (None, directive.key):
                 yield directive
 
+    def section_values(self, section: str, key: str) -> list[str]:
+        """
+        The values of a directive in every section of this name, in order, as podman reads them.
+
+        A section can appear more than once; podman reads them all as one.
+
+        A line ending in a backslash goes on in the next one, whose leading whitespace is dropped.
+        The value is trimmed, and one wrapped in double quotes loses them. Single quotes and
+        backslashes inside the value are kept as written: podman keeps them too.
+
+        Not read as podman reads it: a comment line inside a continued value, which podman skips
+        and this joins in.
+        """
+        values = []
+        current = None
+        lines = iter(self.lines)
+        for line in lines:
+            if self._is_section_header(line):
+                current = line.strip()[1:-1]
+                continue
+            directive = Directive.parse(line)
+            if current != section or directive is None or directive.key != key:
+                continue
+
+            value = directive.value.rstrip()
+            while value.endswith("\\"):
+                value = value[:-1] + next(lines, "").strip()
+            value = value.strip()
+            if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
+            values.append(value)
+        return values
+
     def has_section(self, section: str) -> bool:
         """Whether a section header appears, for a section name given without brackets."""
         header = f"[{section}]"

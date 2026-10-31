@@ -1,6 +1,7 @@
 [Unit]
 Description=Log and metrics agent
 RequiresMountsFor=/var/log/journal
+Wants=agent--probe.service agent--gpu-exporter.service
 RequiresMountsFor=/var/lib/containers/storage
 Requires=agent--state-volume-init.service
 After=agent--state-volume-init.service

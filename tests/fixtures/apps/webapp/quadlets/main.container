@@ -1,6 +1,6 @@
 [Unit]
 Description=Web frontend
-Wants=api.service
+Wants=api.service worker.service
 After=api.service
 
 [Container]

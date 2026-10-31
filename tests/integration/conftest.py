@@ -34,6 +34,7 @@ from ansible_collections.kriansa.quadlet.tests.integration.harness.provision imp
 )
 from ansible_collections.kriansa.quadlet.tests.integration.harness.qemu import Vm
 from ansible_collections.kriansa.quadlet.tests.integration.harness.seed import ensure_ssh_key
+from ansible_collections.kriansa.quadlet.tests.integration.harness.stack import Stack
 
 REQUIRED_TOOLS = ("qemu-system-x86_64", "qemu-img", "xorriso", "ssh", "ssh-keygen")
 
@@ -140,8 +141,8 @@ def make_app(request, host, runner, clean_host, tmp_path):
     made = []
     since = host.cursor()
 
-    def factory(tag: str = "app") -> App:
-        app = App(new_app_name(tag), playbook_dir, host, runner)
+    def factory(tag: str = "app", apps_dir: str = "apps") -> App:
+        app = App(new_app_name(tag), playbook_dir, host, runner, apps_dir)
         made.append(app)
         return app
 
@@ -156,6 +157,20 @@ def make_app(request, host, runner, clean_host, tmp_path):
     if not os.environ.get("QA_KEEP_APPS"):
         for app in made:
             remove_from_host(host, app.name)
+
+
+@pytest.fixture
+def make_stack(make_app, host, runner, tmp_path):
+    """
+    A stack of apps deployed through the quadlet_stack role: make_stack.app("tag") adds an app.
+
+    Its apps are made by make_app, and removed with the rest. What its test provider recorded on
+    the VM is removed too.
+    """
+    stack = Stack(tmp_path / "playbook", host, runner, make_app)
+    yield stack
+    if not os.environ.get("QA_KEEP_APPS"):
+        host.run(f"rm -f {stack.provider_log}", check=False)
 
 
 def diagnose(host: Host, app: App, since: str) -> str:

@@ -21,14 +21,14 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
+        "LoadState",
         "kube-app--main.service"
       ],
       "timeout": 10
@@ -47,10 +47,29 @@
     {
       "argv": [
         "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "kube-app--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "podman",
+        "network",
+        "exists",
+        "kube-app--app"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "kube-app--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

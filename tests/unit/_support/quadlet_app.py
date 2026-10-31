@@ -9,7 +9,7 @@ the action plugin lives in quadlet_app_render.py.
 from dataclasses import dataclass, field
 from typing import Any
 
-from ansible_collections.kriansa.quadlet.plugins.module_utils import generator, systemctl
+from ansible_collections.kriansa.quadlet.plugins.module_utils import generator, podman, systemctl
 from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import HostFile
 from ansible_collections.kriansa.quadlet.plugins.module_utils.quadlets import Volume
 from ansible_collections.kriansa.quadlet.plugins.modules import quadlet_app as module
@@ -89,14 +89,14 @@ def tree_to_files_data(tree: dict[str, str]) -> dict[str, list[dict[str, Any]]]:
 
 def install_processes(monkeypatch, subprocess_module, time_module=None):
     """
-    Stand in for every process the module starts - systemctl, journalctl and podman's generator -
-    and, if given, for its pauses.
+    Stand in for every process the module starts - systemctl, journalctl, podman and podman's
+    generator - and, if given, for its pauses.
 
     Args:
         subprocess_module: Takes the place of `subprocess` wherever the module starts a process
         time_module: Takes the place of `time` where the module waits
     """
-    for user in (systemctl, generator):
+    for user in (systemctl, generator, podman):
         monkeypatch.setattr(user, "subprocess", subprocess_module)
     if time_module is not None:
         monkeypatch.setattr(systemctl, "time", time_module)
@@ -163,6 +163,7 @@ class Outcome:
 
     exit: dict[str, Any] | None = None
     failure: dict[str, Any] | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -180,7 +181,9 @@ def run_module(
     src: str = "/apps/app",
     state: str = "installed",
     force: bool = False,
-    systemctl_timeout: int = 120,
+    systemctl_timeout: int = 300,
+    main_container: str = "main",
+    networks_only: bool = False,
     settle_time: int = 0,
     name: str | None = None,
     control_node_processed: bool = True,
@@ -189,7 +192,8 @@ def run_module(
     Run the real module with these parameters and report how it ended.
 
     The settle check is off unless asked for: it has tests of its own, and every other test would
-    otherwise have its queries in the way.
+    otherwise have its queries in the way. systemctl_timeout and main_container are what the
+    action plugin reads from the app's manifest, their defaults when it has none.
     """
     fake = FakeModule(
         {
@@ -197,8 +201,10 @@ def run_module(
             "name": name,
             "state": state,
             "force": force,
-            "systemctl_timeout": systemctl_timeout,
             "settle_time": settle_time,
+            "_systemctl_timeout": systemctl_timeout,
+            "_main_container": main_container,
+            "_networks_only": networks_only,
             "_control_node_processed": control_node_processed,
             **to_module_args(files_data),
         }
@@ -206,9 +212,9 @@ def run_module(
     try:
         module.QuadletAppModule(fake).run()
     except AnsibleExitJson as e:
-        return Outcome(exit=e.result)
+        return Outcome(exit=e.result, warnings=fake.warnings)
     except AnsibleFailJson as e:
-        return Outcome(failure=e.result)
+        return Outcome(failure=e.result, warnings=fake.warnings)
     raise AssertionError("the module returned without calling exit_json or fail_json")
 
 
@@ -243,8 +249,11 @@ def deploy_fresh(
             "name": None,
             "state": "started",
             "force": False,
-            "systemctl_timeout": 120,
             "settle_time": 5,
+            # What the action plugin sends for an app without a manifest
+            "_systemctl_timeout": 300,
+            "_main_container": "main",
+            "_networks_only": False,
             "_control_node_processed": True,
             **to_module_args(files_data),
             **params,

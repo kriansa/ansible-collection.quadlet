@@ -71,6 +71,17 @@ class TestDiffersFromHost:
         on_host(file, "content\n")
         assert file.differs_from_host() is True
 
+    def test_windows_line_endings_match_once_written(self, app):
+        # Otherwise such a file would be deployed again on every run
+        file = config_file(app, "a=1\r\nb=2\r\n")
+        file.write()
+        assert file.differs_from_host() is False
+
+    def test_line_endings_count(self, app):
+        file = config_file(app, "a=1\r\n")
+        on_host(file, "a=1\n")
+        assert file.differs_from_host() is True
+
     def test_unreadable(self, app, monkeypatch):
         file = config_file(app, "content")
         on_host(file, "content")

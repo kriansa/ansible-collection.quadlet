@@ -1,0 +1,36 @@
+---
+argument_specs:
+  main:
+    short_description: Deploy the apps of a host, and satisfy the resource claims they make
+    description:
+      - Reads every app under O(quadlet_stack_src) with M(kriansa.quadlet.quadlet_stack_info),
+        creates every app's missing networks, then deploys the selected apps with
+        M(kriansa.quadlet.quadlet_app).
+      - Each app's manifest can claim resources from roles, by name. Every role named by a claim
+        is included once before the deploy and once after it, with C(quadlet_hook) set to
+        C(before) or C(after), C(quadlet_claims) holding every claim addressed to it, and
+        C(quadlet_stack) holding everything quadlet_stack_info read.
+      - Include it with M(ansible.builtin.include_role) and C(apply) for any tags you run it under,
+        so they reach the tasks it includes in turn.
+    options:
+      quadlet_stack_src:
+        description:
+          - The directory holding one directory per app, relative to the playbook.
+        type: str
+        default: quadlet-apps
+      quadlet_stack_deploy_only:
+        description:
+          - The apps to deploy, by name. Empty deploys every app.
+          - Every app's networks are created, and every app's claims reach the providers,
+            whichever apps are selected.
+          - An unknown name fails the run before anything is done.
+        type: list
+        elements: str
+        default: []
+      quadlet_stack_state:
+        description:
+          - What to do with each deployed app's services, as
+            O(kriansa.quadlet.quadlet_app#module:state) does.
+        type: str
+        choices: [installed, started, restarted]
+        default: installed

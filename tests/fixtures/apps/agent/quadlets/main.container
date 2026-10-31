@@ -1,6 +1,7 @@
 [Unit]
 Description=Log and metrics agent
 RequiresMountsFor=/var/log/journal
+Wants=probe.service gpu-exporter.service
 
 [Container]
 Image=ghcr.io/example/agent:{{ agent_version }}

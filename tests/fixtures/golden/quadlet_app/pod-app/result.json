@@ -21,41 +21,15 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "is-enabled",
-        "pod-app--backend.timer"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
-        "systemctl",
-        "enable",
-        "pod-app--backend.timer"
-      ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "restart",
-        "pod-app--backend.timer"
-      ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
-        "pod-app--backend-pod.service",
-        "pod-app--main.service",
-        "pod-app--sidecar.service"
+        "LoadState",
+        "pod-app--main.service"
       ],
       "timeout": 10
     },
@@ -73,10 +47,46 @@
     {
       "argv": [
         "systemctl",
+        "is-enabled",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "enable",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "pod-app--backend.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "pod-app--backend-pod.service",
+        "pod-app--main.service",
+        "pod-app--sidecar.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "pod-app--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

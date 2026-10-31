@@ -136,14 +136,15 @@ def test_settle_time_zero_turns_the_check_off(make_app, host):
 
 
 def test_app_without_main_container(make_app, host):
-    """Pinned: nothing checks for main.container; it only matters once main has to start."""
+    """Checked under every state, before anything is written."""
     app = make_app("nomain")
     app.write("quadlets/db.container", main())
 
-    assert not app.deploy("installed").failed
-    started = app.deploy("started")
-    assert started.failed
-    assert "not found" in started.msg
+    step = app.deploy("installed")
+
+    assert step.failed
+    assert step.msg.startswith(f"The app {app.name} has no main quadlet: expected one of ")
+    assert not host.exists(app.quadlet_path("db.container"))
 
 
 @pytest.mark.parametrize(

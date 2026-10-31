@@ -21,17 +21,15 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
-        "webapp--api.service",
-        "webapp--main.service",
-        "webapp--worker.service"
+        "LoadState",
+        "webapp--main.service"
       ],
       "timeout": 10
     },
@@ -49,11 +47,32 @@
     {
       "argv": [
         "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "webapp--api.service",
+        "webapp--main.service",
+        "webapp--worker.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "podman",
+        "network",
+        "exists",
+        "webapp--app"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "webapp--cache-volume-init.service",
         "webapp--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

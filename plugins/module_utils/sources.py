@@ -30,14 +30,18 @@ class ActionPluginFiles:
         self.files = files or []
         self.contents = contents or []
 
-    def load(self, name: str) -> QuadletApp:
+    def load(self, name: str, main_container: str = constants.DEFAULT_MAIN_CONTAINER) -> QuadletApp:
         """
         Build the app out of the files.
+
+        Args:
+            name: The application name
+            main_container: The quadlet whose service is the app's main one, without extension
 
         Raises:
             QuadletAppError: If the name is invalid, or the names and contents do not match up
         """
-        app = QuadletApp(name)
+        app = QuadletApp(name, main_container)
         groups = self._grouped()
         for entry in groups["quadlets"]:
             app.add_quadlet(entry["name"], entry["content"])
@@ -78,15 +82,19 @@ class AppDirectory:
         """
         self.src = src
 
-    def load(self, name: str) -> QuadletApp:
+    def load(self, name: str, main_container: str = constants.DEFAULT_MAIN_CONTAINER) -> QuadletApp:
         """
         Check the directory and build the app out of its files.
+
+        Args:
+            name: The application name
+            main_container: The quadlet whose service is the app's main one, without extension
 
         Raises:
             QuadletAppError: If the directory, the name or a file is not usable
         """
         self.check_location()
-        app = QuadletApp(name)
+        app = QuadletApp(name, main_container)
         self.check_layout()
 
         quadlet_files = self.quadlet_files()
@@ -128,19 +136,14 @@ class AppDirectory:
         Check what the directory holds.
 
         Rules:
-        1. quadlets/main.container exists
-        2. init/ and config/ subdirectories use the quadlet stem without suffix (e.g., main/, not
+        1. init/ and config/ subdirectories use the quadlet stem without suffix (e.g., main/, not
            main.container/)
-        3. A corresponding .container or .pod quadlet file exists for each of them
-        4. The match is unambiguous (no both main.container and main.pod)
-        """
-        main_container = os.path.join(self.src, "quadlets", "main.container")
-        if not os.path.isfile(main_container):
-            raise QuadletAppError(
-                f"Required file not found: {main_container}. "
-                "The quadlets/main.container file is mandatory."
-            )
+        2. A corresponding .container or .pod quadlet file exists for each of them
+        3. The match is unambiguous (no both main.container and main.pod)
 
+        Whether the app has its main quadlet is checked on the app itself, the same way whichever
+        way its files arrive.
+        """
         for dir_name in ["init", "config"]:
             dir_path = os.path.join(self.src, dir_name)
             if not os.path.isdir(dir_path):

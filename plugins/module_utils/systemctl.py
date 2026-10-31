@@ -109,43 +109,56 @@ class Systemd:
         return properties
 
     @staticmethod
-    def dependencies(service: str, prefix: str) -> list[str]:
+    def dependencies(service: str) -> list[str] | None:
         """
-        The services a service depends on, however indirectly, whose name has this prefix.
+        The services a service depends on, however indirectly.
 
         Returns:
-            Their names, the service itself left out. Empty when the service does not exist yet,
-            or the query times out.
+            Their names, the service itself left out. None when systemd could not say: it does
+            not have the service, or a query failed or timed out.
 
         Raises:
             QuadletAppError: If systemctl is not there to ask
         """
+        # Listing the dependencies of a unit systemd does not have succeeds, and shows a unit with
+        # none - which would read as a service that depends on nothing. So whether systemd has it
+        # is asked first.
+        load_state = Systemd._query("show", "-p", "LoadState", service)
+        if load_state is None or "LoadState=loaded" not in load_state.stdout.splitlines():
+            return None
+
         # Without --all, systemctl only expands targets, so a container two Requires= away from
         # main would be left out - and keep running its old definition after a deploy that
         # changed it.
-        try:
-            result = subprocess.run(
-                ["systemctl", "list-dependencies", "--all", "--type", "service", service],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=10,
-            )
-        except subprocess.TimeoutExpired:
-            return []
-        except FileNotFoundError as e:
-            raise QuadletAppError(f"systemctl command not found: {e}") from e
-
-        if result.returncode != 0:
-            return []
+        result = Systemd._query("list-dependencies", "--all", "--type", "service", service)
+        if result is None:
+            return None
 
         dependencies = []
         for line in result.stdout.splitlines():
             # --type only indents, it draws no tree
-            name = line.lstrip()
-            if name.startswith(prefix) and name != service:
+            name = line.strip()
+            if name.endswith(".service") and name != service and name not in dependencies:
                 dependencies.append(name)
         return dependencies
+
+    @staticmethod
+    def _query(*args: str) -> subprocess.CompletedProcess | None:
+        """
+        Run a systemctl query; None if it failed or timed out.
+
+        Raises:
+            QuadletAppError: If systemctl is not there to ask
+        """
+        try:
+            result = subprocess.run(
+                ["systemctl", *args], capture_output=True, text=True, check=False, timeout=10
+            )
+        except subprocess.TimeoutExpired:
+            return None
+        except FileNotFoundError as e:
+            raise QuadletAppError(f"systemctl command not found: {e}") from e
+        return result if result.returncode == 0 else None
 
     @staticmethod
     def journal_tail(unit: str) -> str:

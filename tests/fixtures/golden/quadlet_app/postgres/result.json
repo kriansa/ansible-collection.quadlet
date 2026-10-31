@@ -21,39 +21,14 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "is-enabled",
-        "postgres--backup.timer"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
-        "systemctl",
-        "enable",
-        "postgres--backup.timer"
-      ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "restart",
-        "postgres--backup.timer"
-      ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
-        "postgres--backup.service",
+        "LoadState",
         "postgres--main.service"
       ],
       "timeout": 10
@@ -72,12 +47,56 @@
     {
       "argv": [
         "systemctl",
+        "is-enabled",
+        "postgres--backup.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "enable",
+        "postgres--backup.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "postgres--backup.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "postgres--backup.service",
+        "postgres--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "podman",
+        "network",
+        "exists",
+        "postgres--app"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "postgres--data-volume-init.service",
         "postgres--dumps-volume-init.service",
         "postgres--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

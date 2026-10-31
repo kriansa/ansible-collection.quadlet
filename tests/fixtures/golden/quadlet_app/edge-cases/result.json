@@ -21,39 +21,14 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "is-enabled",
-        "edge-cases--cleanup.timer"
-      ],
-      "timeout": 10
-    },
-    {
-      "argv": [
-        "systemctl",
-        "enable",
-        "edge-cases--cleanup.timer"
-      ],
-      "timeout": 120
-    },
-    {
-      "argv": [
-        "systemctl",
-        "restart",
-        "edge-cases--cleanup.timer"
-      ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
-        "edge-cases--db.service",
+        "LoadState",
         "edge-cases--main.service"
       ],
       "timeout": 10
@@ -72,11 +47,55 @@
     {
       "argv": [
         "systemctl",
+        "is-enabled",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
+        "enable",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "restart",
+        "edge-cases--cleanup.timer"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "edge-cases--db.service",
+        "edge-cases--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "podman",
+        "network",
+        "exists",
+        "custom-net"
+      ],
+      "timeout": 30
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "edge-cases--data-volume-init.service",
         "edge-cases--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

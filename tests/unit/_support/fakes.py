@@ -38,6 +38,11 @@ class FakeModule:
 
     def __init__(self, params: dict[str, Any]):
         self.params = params
+        # What the module warned about, which AnsibleModule would add to the task's result
+        self.warnings: list[str] = []
+
+    def warn(self, warning: str):
+        self.warnings.append(warning)
 
     def exit_json(self, **kwargs):
         raise AnsibleExitJson(kwargs)
@@ -100,6 +105,10 @@ class FakeSystemd:
     journal: dict[str, str] = field(default_factory=dict)
     # Unit -> how many times it has been started, which stands in for its InvocationID
     invocations: dict[str, int] = field(default_factory=dict)
+    # Networks podman does not have: renamed, or removed by hand. Every other network exists.
+    lost_networks: set = field(default_factory=set)
+    # Units systemd does not have - a quadlet the generator skipped. Every other unit is loaded.
+    not_found: set = field(default_factory=set)
     failed: set = field(default_factory=set)
     # The pauses the module took, in seconds
     sleeps: list[float] = field(default_factory=list)
@@ -125,6 +134,11 @@ class FakeSystemd:
         if argv[0] == "journalctl":
             unit = argv[argv.index("--unit") + 1]
             return subprocess.CompletedProcess(argv, 0, self.journal.get(unit, ""), "")
+
+        if argv[:3] == ["podman", "network", "exists"]:
+            return subprocess.CompletedProcess(
+                argv, 1 if argv[3] in self.lost_networks else 0, "", ""
+            )
 
         if argv[0] != "systemctl":
             raise AssertionError(f"unexpected process: {argv}")
@@ -185,6 +199,7 @@ class FakeSystemd:
         return "\n".join(
             [
                 f"Id={unit}",
+                f"LoadState={'not-found' if unit in self.not_found else 'loaded'}",
                 f"Type={self.types.get(unit, 'notify')}",
                 f"ActiveState={state}",
                 f"SubState={substate}",

@@ -172,6 +172,72 @@ class TestNames:
         assert render("main.kube", content) == content
 
 
+class TestNetworkName:
+    """The name podman gives a network: what the deployed file's NetworkName= says."""
+
+    def network(self, content):
+        app = QuadletApp(APP)
+        return app.add_quadlet("main.network", content)
+
+    def test_the_apps_prefixed_name_by_default(self):
+        assert self.network("[Network]\nSubnet=10.0.0.0/24\n").network_name == "app--main"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "NetworkName=edge",
+            "NetworkName = edge \r",
+            # podman removes the quotes, and joins a continued line
+            'NetworkName="edge"',
+            "NetworkName=ed\\\n  ge",
+        ],
+    )
+    def test_the_files_own_name(self, line):
+        assert self.network(f"[Network]\n{line}\n").network_name == "edge"
+
+    def test_the_name_in_another_copy_of_the_file(self):
+        # What a deployed copy of it names, which can differ from what the app's file names now
+        network = self.network("[Network]\nNetworkName=new\n")
+        assert network.network_name_in("[Network]\nNetworkName=old\n") == "old"
+        assert network.network_name_in("[Network]\n") == "systemd-app--main"
+
+    def test_the_last_one_counts(self):
+        assert self.network("[Network]\nNetworkName=a\nNetworkName=b\n").network_name == "b"
+
+    def test_every_network_section_counts(self):
+        content = "[Network]\nNetworkName=a\n\n[Network]\nNetworkName=b\n"
+        assert self.network(content).network_name == "b"
+
+    def test_only_the_network_section_counts(self):
+        content = "[Network]\nNetworkName=a\n\n[Unit]\nNetworkName=b\n"
+        assert self.network(content).network_name == "a"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            # Empty reads as unset to podman, and Rule 3 adds nothing to a file that sets it
+            "[Network]\nNetworkName=\n",
+            # Nothing to inject a name into; podman's generator accepts the file all the same
+            "# empty\n",
+        ],
+    )
+    def test_podmans_default(self, content):
+        assert self.network(content).network_name == "systemd-app--main"
+
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            # podman skips a comment line inside a continued value, and reads "edge"
+            ("NetworkName=ed\\\n# note\nge", "ed# note"),
+            # systemd expands the specifier when the unit runs, into "app--main-network"
+            ("NetworkName=%N", "%N"),
+        ],
+    )
+    def test_pinned_read_otherwise_than_podman(self, line, expected):
+        # The docs ask for a plain name, since these are not the names podman creates
+        assert self.network(f"[Network]\n{line}\n").network_name == expected
+
+
 class TestRendering:
     def test_comments_and_blank_lines_are_untouched(self):
         content = "[Container]\n# Network=main.network\n\nImage=x\n"

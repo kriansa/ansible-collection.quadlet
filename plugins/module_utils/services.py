@@ -4,8 +4,11 @@
 
 """Bringing the app's services and timers to the state the task asks for."""
 
+import functools
+
 from ansible_collections.kriansa.quadlet.plugins.module_utils.app import QuadletApp
 from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import HostFiles
+from ansible_collections.kriansa.quadlet.plugins.module_utils.podman import Podman
 from ansible_collections.kriansa.quadlet.plugins.module_utils.systemctl import ServiceWatch, Systemd
 
 
@@ -37,6 +40,8 @@ class AppServices:
         self.timer_changes = {timer.deployed_name: files.changed(timer) for timer in app.timers}
         # Generated ownership bootstrap services whose volume has yet to get its declared owner
         self.pending_volume_inits = app.pending_volume_inits()
+        # What the task should be warned about, found while applying
+        self.warnings: list[str] = []
 
     def need_attention(self) -> bool:
         """Whether the services are not in the state asked for, whether or not any file changes."""
@@ -46,9 +51,13 @@ class AppServices:
             return True
 
         if self.state == "started":
-            # Need to start if not currently active, or to give a volume its declared owner
-            return not self.systemd.is_active(self.app.main_service) or bool(
-                self.pending_volume_inits
+            # Need to start if not currently active, to give a volume its declared owner, or to
+            # create a network podman does not have - renamed by a deploy under installed, which
+            # leaves running units alone, or removed by hand
+            return (
+                not self.systemd.is_active(self.app.main_service)
+                or bool(self.pending_volume_inits)
+                or bool(self._missing_networks)
             )
         # Always restart when restarted state is requested
         return self.state == "restarted"
@@ -70,6 +79,8 @@ class AppServices:
         if files_changed:
             self.systemd.run("daemon-reload")
             changed = True
+            # Asked only now that systemd has the new units: a dependency added this run counts
+            self.warnings.extend(self._loose_service_warnings())
 
         # Timers are reconciled on every state, main service or not, and only after the reload
         # above - systemd has not seen a newly written unit file before that
@@ -97,14 +108,19 @@ class AppServices:
         if needs_restart:
             self._restart_app()
             changed = True
-        else:
-            # Main is not being restarted, but a volume waiting for its owner still gets it - and
-            # before main mounts the volume, if it is about to be started below. Not under
-            # installed, which leaves running containers alone: running a bootstrap unit again
-            # restarts every container that mounts its volume.
-            if self.state != "installed" and self._restart_volume_init_units():
+        elif self.state == "started":
+            # Main is not being restarted, but some units it depends on still have to run again:
+            # a volume waiting for its owner gets it - before main mounts the volume, if it is about
+            # to be started below - and a network podman does not have is created again. Both
+            # stay active after running once, so main requiring them would not run them again.
+            # Not under installed, which leaves running containers alone: restarting either
+            # restarts every container that uses it.
+            rerun = self.pending_volume_inits + self._missing_networks
+            if rerun:
+                # In one call, so a container using both - main among them - restarts only once
+                self.systemd.run("restart", *rerun)
                 changed = True
-            if self.state == "started" and not self.systemd.is_active(main_service):
+            if not self.systemd.is_active(main_service):
                 # Start service if not already active (no restart needed)
                 self.systemd.run("start", main_service)
                 changed = True
@@ -123,19 +139,80 @@ class AppServices:
         earlier is restarted again by systemd on its own - which is how main used to go round two
         or three times per deploy.
 
+        Only the app's own units are restarted. Main's dependencies include whatever else it
+        requires - host units, or another app's network - and those are not this app's to
+        restart. Units are told apart by name, not by the app's prefix, which another app's
+        name can start with too.
+
         The bootstrap units main depends on whose owner is already applied are left out.
         Restarting one does nothing useful - its marker makes the condition fail and the unit is
         skipped - and it would still take down every container that requires it.
+
+        So are the app's networks, unless podman no longer has them. systemd restarts every unit
+        that requires a restarted one, and the containers of other apps joining the network
+        require it - restarting it on every deploy would restart them too. And it would apply no
+        change: podman creates a network only if it does not exist. One that does not exist -
+        renamed by a NetworkName= change, or removed by hand - is restarted, so podman creates it:
+        its unit stays active after running once, and main requiring it would not run it again.
+        The apps joined to it are restarted with it, which a network that changed name needs.
         """
         main_service = self.app.main_service
-        all_init_units = set(self.app.volume_init_services())
+        own = self.app.own_services()
+        left_out = set(self.app.volume_init_services()) | {
+            network.service_name for network in self.app.networks
+        }
         dependencies = [
-            unit
-            for unit in self.systemd.dependencies(main_service, f"{self.app.name}--")
-            if unit not in all_init_units
+            unit for unit in self._main_dependencies or [] if unit in own and unit not in left_out
         ]
-        units = self.pending_volume_inits + dependencies + [main_service]
+        units = self.pending_volume_inits + self._missing_networks + dependencies + [main_service]
         self.systemd.run("restart", *dict.fromkeys(units))
+
+    @functools.cached_property
+    def _main_dependencies(self) -> list[str] | None:
+        """
+        Main's dependencies, as systemctl reports them; None if it could not say.
+
+        Asked once: everything that asks runs after the reload that makes systemd see this run's
+        files, and nothing in between changes the units.
+        """
+        return self.systemd.dependencies(self.app.main_service)
+
+    @functools.cached_property
+    def _missing_networks(self) -> list[str]:
+        """
+        The services of the app's networks that podman does not have.
+
+        Asked once: nothing a run does before restarting them creates or removes a network.
+        """
+        return [
+            network.service_name
+            for network in self.app.networks
+            if not Podman.network_exists(network.network_name)
+        ]
+
+    def _loose_service_warnings(self) -> list[str]:
+        """
+        A warning for each of the app's services that nothing links to its main one.
+
+        The module starts and restarts main and what main depends on, and leaves the rest of the
+        orchestration to systemd. A container main does not require or want, directly or not, is
+        never started by a deploy, nor restarted when it changes. The services the app's timers
+        run are left out: they are meant to run on their schedule only.
+        """
+        main_service = self.app.main_service
+        tree = self._main_dependencies
+        if tree is None:
+            # systemd could not say; better no warning than one about every service
+            return []
+
+        linked = set(tree) | {main_service} | self.app.timer_targets()
+        return [
+            f"{service} is not linked to {main_service}, so deploying the app never starts it, "
+            "nor restarts it when it changes. Add Requires= or Wants= on it to the main quadlet's "
+            "[Unit] section, or have a timer run it."
+            for service in self.app.services()
+            if service not in linked
+        ]
 
     def _reconcile_timers(self) -> bool:
         """
@@ -166,25 +243,6 @@ class AppServices:
                 changed = True
 
         return changed
-
-    def _restart_volume_init_units(self) -> bool:
-        """
-        Run the pending ownership bootstrap units.
-
-        They are Type=oneshot with RemainAfterExit=yes, so once one has run it stays active and
-        systemd never re-checks its condition. Without an explicit restart, a new owner would not
-        be applied until the host next booted.
-
-        These cannot be picked up by the dependency walk in _restart_app: that starts from the main
-        service, and a volume mounted only by a secondary container is not in its tree.
-
-        Returns:
-            True if any unit was run
-        """
-        if not self.pending_volume_inits:
-            return False
-        self.systemd.run("restart", *self.pending_volume_inits)
-        return True
 
     def _has_stale_timer(self) -> bool:
         """Whether any deployed timer is not enabled or not running."""

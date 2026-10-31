@@ -256,6 +256,35 @@ class Network(Quadlet):
 
     NAME_DIRECTIVE = ("Network", "NetworkName")
 
+    @property
+    def network_name(self) -> str:
+        """
+        The name podman gives the network.
+
+        That is the NetworkName= the deployed file's [Network] section sets, which Rule 3 makes
+        the app's prefixed name unless the file chose one of its own. It is read the way podman
+        reads it - quotes removed, continued lines joined - and the last one counts, as it does for
+        podman. Without one, or with an empty one, podman falls back to its own default, systemd-
+        and the deployed file's name.
+
+        The name is what the module asks podman about, to tell whether the network has to be
+        created again. Read any other way, podman never has it, and the network - with every
+        container joined to it, other apps' included - would be restarted on every deploy.
+
+        Two forms are still read differently, and the docs ask for a plain name instead: a
+        comment line inside a continued value, which podman skips, and a systemd specifier such as
+        %N, which systemd expands only when the unit runs. Asking podman or systemd for the name
+        would avoid both, but this is also read on the control node, which has neither.
+        """
+        return self.network_name_in(self.content)
+
+    def network_name_in(self, text: str) -> str:
+        """The name podman gives the network a deployed file of this quadlet defines."""
+        names = UnitFile(text).section_values("Network", "NetworkName")
+        if names and names[-1]:
+            return names[-1]
+        return f"systemd-{Path(self.deployed_name).stem}"
+
 
 class Volume(Quadlet):
     """

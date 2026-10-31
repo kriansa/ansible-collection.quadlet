@@ -86,6 +86,42 @@ class TestName:
         )
 
 
+class TestFileNames:
+    @pytest.mark.parametrize("filename", ["x--main.network", "a--b.container", "x--.volume"])
+    def test_a_quadlet_name_cannot_hold_the_separator(self, filename):
+        # Deployed by app "web", it would take the name app "web--x" gives its own file
+        with pytest.raises(QuadletAppError) as excinfo:
+            QuadletApp("web").add_quadlet(filename, "")
+        assert str(excinfo.value) == (
+            f"The app web cannot deploy quadlets/{filename}: a file name cannot contain '--'. "
+            f"Deployed as web--{filename}, it could take the name of another app's file, since "
+            "'--' separates an app's name from its files' names."
+        )
+
+    def test_a_unit_name_cannot_hold_the_separator(self):
+        with pytest.raises(QuadletAppError) as excinfo:
+            QuadletApp("web").add_unit("x--backup.timer", "")
+        assert str(excinfo.value).startswith(
+            "The app web cannot deploy units/x--backup.timer: a file name cannot contain '--'."
+        )
+
+    @pytest.mark.parametrize("filename", ["worker@.container", "worker@1.container", "a@.pod"])
+    def test_template_quadlets_are_not_supported(self, filename):
+        with pytest.raises(QuadletAppError) as excinfo:
+            QuadletApp("web").add_quadlet(filename, "")
+        assert str(excinfo.value) == (
+            f"The app web cannot deploy quadlets/{filename}: template quadlets, whose name has "
+            "an @, are not supported. Write one quadlet for each instance instead."
+        )
+
+    def test_single_hyphens_and_underscores_are_fine(self):
+        app = QuadletApp("web")
+        app.add_quadlet("my-db_1.container", "")
+        app.add_unit("my-backup.timer", "")
+        assert app.deployed_quadlets == ["web--my-db_1.container"]
+        assert app.deployed_units == ["web--my-backup.timer"]
+
+
 class TestRule1PrefixReferences:
     @pytest.mark.parametrize(
         "line, expected",
@@ -302,6 +338,28 @@ class TestLookups:
     def test_main_service(self):
         assert make_app().main_service == "app--main.service"
 
+    def test_networks(self):
+        app = make_app(quadlets=["b.network", "main.container", "a.network"])
+        assert [network.filename for network in app.networks] == ["b.network", "a.network"]
+
+    def test_own_services_by_name(self):
+        app = QuadletApp("web")
+        for name in ("main.container", "edge.pod", "front.network", "data.volume"):
+            app.add_quadlet(name, "")
+        assert app.own_services() == {
+            "web--main.service",
+            "web--edge-pod.service",
+            "web--front-network.service",
+            "web--data-volume.service",
+            "web--data-volume-init.service",
+        }
+
+    def test_timer_targets(self):
+        app = make_app(quadlets=["main.container", "job.container"], units=[])
+        app.add_unit("job.timer", "[Timer]\nOnCalendar=daily\n")
+        app.add_unit("other.timer", "[Timer]\nOnCalendar=daily\nUnit=logrotate.service\n")
+        assert app.timer_targets() == {"app--job.service", "logrotate.service"}
+
     def test_services_are_the_long_running_ones_sorted_by_file(self):
         app = make_app(quadlets=["a.pod", "a-z.container", "web.kube", "n.network", "d.volume"])
         # Sorted by file name, which is not the order of the service names
@@ -323,6 +381,137 @@ class TestLookups:
         (fake_host.state_dir / "app--a.1_1.done").write_text("")
         (fake_host.state_dir / "app--b.5_5.done").write_text("")
         assert app.pending_volume_inits() == ["app--b-volume-init.service"]
+
+
+class TestMainQuadlet:
+    def app(self, quadlets, main_container="main"):
+        app = QuadletApp(APP, main_container)
+        for name in quadlets:
+            app.add_quadlet(name, "")
+        return app
+
+    @pytest.mark.parametrize(
+        "filename, service",
+        [
+            ("main.container", "app--main.service"),
+            ("main.kube", "app--main.service"),
+            # Named after its type, as podman's generator names it
+            ("main.pod", "app--main-pod.service"),
+        ],
+    )
+    def test_any_type_whose_service_keeps_running(self, filename, service):
+        app = self.app([filename, "db.container"])
+        app.check_main()
+        assert app.main_quadlet().filename == filename
+        assert app.main_service == service
+
+    def test_named_by_main_container(self):
+        app = self.app(["main.container", "web.container"], main_container="web")
+        assert app.main_service == "app--web.service"
+
+    def test_the_same_name_of_another_type_does_not_count(self):
+        app = self.app(["main.volume", "main.network", "web.container"])
+        with pytest.raises(QuadletAppError) as excinfo:
+            app.check_main()
+        assert str(excinfo.value) == (
+            "The app app has no main quadlet: expected one of quadlets/main.container, "
+            "quadlets/main.pod, quadlets/main.kube. Which quadlet is the main one is set by "
+            "main_container in the app's manifest, and defaults to 'main'."
+        )
+
+    def test_missing_names_the_configured_one(self):
+        app = self.app(["main.container"], main_container="web")
+        with pytest.raises(QuadletAppError, match="expected one of quadlets/web.container, "):
+            app.check_main()
+        with pytest.raises(QuadletAppError):
+            assert app.main_service
+
+    def test_more_than_one(self):
+        app = self.app(["main.container", "main.pod"])
+        with pytest.raises(
+            QuadletAppError,
+            match="^The app app has more than one main quadlet: main.container, main.pod. "
+            "Keep only one of them.$",
+        ):
+            app.check_main()
+
+
+class TestNetworkReferences:
+    def references(self, sources, files=("main.network", "back.network")):
+        app = QuadletApp(APP)
+        for name in files:
+            app.add_quadlet(name, "[Network]\n")
+        for name, source in sources.items():
+            app.add_quadlet(name, source)
+        return app.network_references()
+
+    def test_the_apps_own_network_carries_its_prefix(self):
+        assert self.references({"main.container": "Network=main.network\n"}) == [
+            "app--main.network"
+        ]
+
+    @pytest.mark.parametrize(
+        "line, expected",
+        [
+            # Another app's, by its file or by the network's name
+            ("Network=other--main.network", "other--main.network"),
+            ("Network=other--main", "other--main"),
+            # A network quadlet this app does not define is left as written
+            ("Network=edge.network", "edge.network"),
+            ("Network=podman", "podman"),
+            # Options are dropped
+            ("Network=main.network:ip=10.0.0.5,alias=web", "app--main.network"),
+            ("Network = other--main:ip=10.0.0.5\r", "other--main"),
+        ],
+    )
+    def test_value(self, line, expected):
+        assert self.references({"main.container": f"[Container]\n{line}\n"}) == [expected]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Network=host",
+            "Network=none",
+            "Network=private",
+            "Network=bridge",
+            "Network=bridge:ip=10.0.0.5",
+            "Network=slirp4netns:port_handler=slirp4netns",
+            "Network=pasta:-T,8080",
+            "Network=ns:/run/netns/x",
+            "Network=container:other",
+            "Network=db.container",
+            "Network=",
+        ],
+    )
+    def test_modes_join_no_network(self, line):
+        assert self.references({"main.container": f"[Container]\n{line}\n"}) == []
+
+    def test_pods_and_kube_files_too_in_file_order_once_each(self):
+        references = self.references(
+            {
+                "main.container": "Network=main.network\nNetwork=other--main\n",
+                "edge.pod": "Network=back.network\nNetwork=main.network\n",
+                "web.kube": "Network=other--main\nNetwork=third\n",
+            }
+        )
+        assert references == ["app--back.network", "app--main.network", "other--main", "third"]
+
+    def test_other_types_do_not_join_networks(self):
+        # A volume or network quadlet has no Network= of its own to join
+        assert self.references({"x.volume": "Network=other--main\n"}) == []
+
+    def test_a_commented_line_does_not_count(self):
+        assert self.references({"main.container": "#Network=other--main\n"}) == []
+
+    def test_an_empty_one_clears_those_before_it(self):
+        # As for any list in a unit file: what Network={{ x | default('') }} renders to
+        references = self.references(
+            {
+                "main.container": "Network=main.network\nNetwork=\nNetwork=other--main\n",
+                "z.container": "Network=back.network\n",
+            }
+        )
+        assert references == ["other--main", "app--back.network"]
 
 
 class TestFiles:

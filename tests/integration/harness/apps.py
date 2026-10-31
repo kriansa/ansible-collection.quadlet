@@ -69,10 +69,22 @@ class Step:
 class App:
     """An app directory plus the means to deploy it."""
 
-    def __init__(self, name: str, playbook_dir: Path, host: Host, runner: PlaybookRunner):
+    def __init__(
+        self,
+        name: str,
+        playbook_dir: Path,
+        host: Host,
+        runner: PlaybookRunner,
+        apps_dir: str = "apps",
+    ):
+        """
+        Args:
+            apps_dir: The directory under the playbook's the app is written in. A stack's apps
+                go in one of their own, since the stack deploys every app it finds there.
+        """
         self.name = name
         self.playbook_dir = playbook_dir
-        self.directory = playbook_dir / "apps" / name
+        self.directory = playbook_dir / apps_dir / name
         self.directory.mkdir(parents=True)
         self.host = host
         self.runner = runner

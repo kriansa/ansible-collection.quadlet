@@ -110,15 +110,16 @@ def test_transitive_dependency_is_restarted_once(make_app, host):
 
 def test_unrelated_container_is_neither_started_nor_restarted(make_app, host):
     """
-    Pinned: a container main does not depend on is left to systemd. Its [Install] section only
-    takes effect at boot, and a change to it does not restart it.
+    A container main does not depend on is left to systemd, and the deploy warns about it. Its
+    [Install] section only takes effect at boot, and a change to it does not restart it.
     """
     app = make_app("standalone")
     app.write("quadlets/main.container", container())
     worker = container("Environment=VERSION=1\n") + "\n[Install]\nWantedBy=multi-user.target\n"
     app.write("quadlets/worker.container", worker)
-    app.deploy("started")
+    first = app.deploy("started")
     assert host.active_state(app.service("worker")) == "inactive"
+    assert f"{app.service('worker')} is not linked to {app.service('main')}" in first.run.output
 
     host.run(f"systemctl start {app.service('worker')}")
     app.write("quadlets/worker.container", worker.replace("VERSION=1", "VERSION=2"))
@@ -127,6 +128,18 @@ def test_unrelated_container_is_neither_started_nor_restarted(make_app, host):
     assert step.changed
     assert step.starts(app.service("worker")) == 0
     assert "VERSION=1" in env(host, app, "worker")
+
+
+def test_a_linked_container_draws_no_warning(make_app, host):
+    app = make_app("linked")
+    app.write("quadlets/main.container", "[Unit]\nWants=worker.service\n\n" + container())
+    app.write("quadlets/worker.container", container())
+
+    step = app.deploy("started")
+
+    assert not step.failed, step.msg
+    assert "is not linked to" not in step.run.output
+    assert host.active_state(app.service("worker")) == "active"
 
 
 def test_volume_of_a_secondary_container_changes_owner(make_app, host):

@@ -1,6 +1,6 @@
 [Unit]
 Description=Web frontend
-Wants=webapp--api.service
+Wants=webapp--api.service webapp--worker.service
 After=webapp--api.service
 RequiresMountsFor=/var/lib/containers/storage
 

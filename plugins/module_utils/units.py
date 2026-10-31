@@ -73,6 +73,14 @@ class Timer(SystemdUnit):
         self._inject_defaults(unit)
         return unit.text
 
+    @property
+    def target_service(self) -> str:
+        """The unit the deployed timer runs, as systemd names it (e.g. "myapp--backup.service")."""
+        targets = [
+            directive.value.strip() for directive in UnitFile(self.content).directives("Unit")
+        ]
+        return targets[-1] if targets else self._target_service()
+
     def _rewrite(self, directive: Directive) -> Directive:
         # Suffix first, prefix second: Unit=backup.pod has to become backup-pod.service before
         # Rule 1 turns it into myapp--backup-pod.service

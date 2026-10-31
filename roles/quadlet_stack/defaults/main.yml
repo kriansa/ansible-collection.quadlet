@@ -1,0 +1,11 @@
+---
+# The directory holding one directory per app, relative to the playbook
+quadlet_stack_src: quadlet-apps
+
+# The apps to deploy, by name. Empty deploys every app. Whatever the selection, every app's
+# networks are created and every app's claims go to the providers.
+quadlet_stack_deploy_only: []
+
+# What to do with each deployed app's services: installed, started or restarted, as for
+# kriansa.quadlet.quadlet_app
+quadlet_stack_state: installed

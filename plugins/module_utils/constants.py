@@ -52,3 +52,23 @@ QUADLET_REFERENCE_DIRECTIVES = {"Network", "Pod", "Volume"}
 # uid, which can be as little as 1024 - far too small for an app that writes as a high uid, and the
 # resulting files are then unmappable.
 DEFAULT_USERNS_SIZE = 65536
+
+# How long, in seconds, the module waits for each systemctl command that changes units, when the
+# app's manifest does not say. This is Ansible giving up on systemctl, not a systemd timeout.
+DEFAULT_SYSTEMCTL_TIMEOUT = 300
+
+# The quadlet whose service is the app's main one, when the app's manifest does not name another
+DEFAULT_MAIN_CONTAINER = "main"
+
+# What a Network= value can start with besides the name of a network: the modes podman runs a
+# container's networking in. Anything before the first ":" that is not one of these is a network.
+PODMAN_NETWORK_MODES = (
+    "bridge",
+    "container",
+    "host",
+    "none",
+    "ns",
+    "pasta",
+    "private",
+    "slirp4netns",
+)

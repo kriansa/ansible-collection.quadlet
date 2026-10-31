@@ -79,7 +79,7 @@ def test_a_oneshot_service_that_finished_is_fine(fake_host, systemd):
 
 def test_only_the_apps_long_running_services_are_watched(fake_host, systemd):
     deploy(systemd, **{"data.volume": "[Volume]\n", "edge.pod": "[Pod]\n"})
-    shows = [line for line in systemd.log if line.startswith("show ")]
+    shows = [line for line in systemd.log if line.startswith(SHOW)]
     services = "app--db.service app--edge-pod.service app--main.service"
     # Before and right after starting them, then the ones started, once the wait is over
     assert shows == [
@@ -107,7 +107,7 @@ def test_not_under_installed(fake_host, systemd):
     systemd.exits_after_start.add(MAIN_SVC)
     assert deploy(systemd, state="installed").changed
     assert systemd.sleeps == []
-    assert not any(line.startswith("show ") for line in systemd.log)
+    assert not any(line.startswith(SHOW) for line in systemd.log)
 
 
 def test_not_when_nothing_was_started(fake_host, systemd):
@@ -125,4 +125,4 @@ def test_zero_turns_it_off(fake_host, systemd):
     systemd.exits_after_start.add(MAIN_SVC)
     assert deploy(systemd, settle_time=0).changed
     assert systemd.sleeps == []
-    assert not any(line.startswith("show ") for line in systemd.log)
+    assert not any(line.startswith(SHOW) for line in systemd.log)

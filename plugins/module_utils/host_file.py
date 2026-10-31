@@ -36,6 +36,24 @@ class HostFile:
         """What the file holds on the host."""
         return self.render()
 
+    def exists_on_host(self) -> bool:
+        """Whether anything is at the file's destination on the host, whatever it holds."""
+        return os.path.exists(self.dest_path)
+
+    def host_content(self) -> str | None:
+        """
+        What the host holds at the file's destination; None if it holds no readable file there.
+        """
+        if not os.path.isfile(self.dest_path):
+            return None
+        # Read as written, line endings included: read otherwise, a file saved with Windows line
+        # endings would never match its own content, and be deployed again on every run
+        try:
+            with open(self.dest_path, encoding="utf-8", newline="") as f:
+                return f.read()
+        except (OSError, UnicodeDecodeError):
+            return None
+
     def differs_from_host(self) -> bool:
         """
         Whether the host holds anything other than this content at the file's destination.
@@ -43,18 +61,9 @@ class HostFile:
         A destination that is missing, is not a regular file, or cannot be read counts as
         different.
         """
-        if not os.path.exists(self.dest_path):
+        existing_content = self.host_content()
+        if existing_content is None:
             return True
-
-        if not os.path.isfile(self.dest_path):
-            return True
-
-        try:
-            with open(self.dest_path, encoding="utf-8") as f:
-                existing_content = f.read()
-        except (OSError, UnicodeDecodeError):
-            return True
-
         return self._checksum(existing_content) != self._checksum(self.content)
 
     def write(self) -> None:

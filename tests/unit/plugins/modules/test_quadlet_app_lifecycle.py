@@ -73,6 +73,9 @@ class TestFreshHost:
         assert systemd.log == [
             "generator",
             "daemon-reload",
+            # Which of the app's containers main links to, now that systemd has the new units
+            f"show -p LoadState {MAIN_SVC}",
+            f"list-dependencies --all --type service {MAIN_SVC}",
         ]
         assert sorted(fake_host.files()) == [
             "etc/containers/systemd/app--data-volume-init.container",
@@ -89,6 +92,8 @@ class TestFreshHost:
             f"is-active {MAIN_SVC}",
             "generator",
             "daemon-reload",
+            # Asked once, for both the warning about unlinked containers and the restart
+            f"show -p LoadState {MAIN_SVC}",
             f"list-dependencies --all --type service {MAIN_SVC}",
             # Restarting a unit that is not running starts it
             f"restart {INIT_SVC} {MAIN_SVC}",
@@ -103,6 +108,7 @@ class TestFreshHost:
         assert systemd.log == [
             "generator",
             "daemon-reload",
+            f"show -p LoadState {MAIN_SVC}",
             f"list-dependencies --all --type service {MAIN_SVC}",
             # One transaction: pending bootstrap units first, then dependencies, then main
             f"restart {INIT_SVC} app--db.service {MAIN_SVC}",
@@ -135,6 +141,19 @@ class TestUnchanged:
         outcome = run_module(app(), state="started")
         assert outcome.exit["changed"] is False
         assert deployed.log == [f"is-active {MAIN_SVC}"]
+
+    def test_files_with_windows_line_endings_are_a_no_op(self, fake_host, systemd):
+        crlf = app(
+            quadlets={"db.container": DB.replace("\n", "\r\n")},
+            config={"main": {"app.conf": "a=1\r\n"}},
+        )
+        run_module(crlf, state="started")
+        systemd.calls.clear()
+
+        outcome = run_module(crlf, state="started")
+
+        assert outcome.exit["changed"] is False
+        assert systemd.state_changes == []
 
     def test_started_but_stopped_only_starts(self, deployed):
         deployed.active.discard(MAIN_SVC)
@@ -200,6 +219,157 @@ class TestChanged:
         assert deployed.state_changes == [
             ["daemon-reload"],
             ["restart", "app--db.service", MAIN_SVC],
+        ]
+
+    def test_the_apps_networks_are_not_restarted(self, deployed):
+        """
+        Restarting a network would restart every container of other apps joined to it, and
+        applies no change to the network either way.
+        """
+        deployed.dependencies[MAIN_SVC] = ["app--edge-network.service", "app--db.service"]
+        outcome = run_module(
+            app(
+                quadlets={
+                    "edge.network": "[Network]\nSubnet=10.1.0.0/24\n",
+                    "main.container": MAIN + "Network=edge.network\n",
+                }
+            ),
+            state="started",
+        )
+
+        assert outcome.changed
+        assert deployed.state_changes == [
+            ["daemon-reload"],
+            ["restart", "app--db.service", MAIN_SVC],
+        ]
+
+    def test_another_apps_units_are_not_restarted(self, deployed):
+        """
+        Main's dependencies can reach another app - an app called "app--x" here, whose name
+        starts with this one's prefix too. Restarting its network would restart that app.
+        """
+        deployed.dependencies[MAIN_SVC] = [
+            "app--db.service",
+            "app--x--main-network.service",
+            "app--x--main.service",
+            "sshd.service",
+        ]
+        run_module(app(quadlets={"db.container": DB + "Environment=V=2\n"}), state="started")
+        assert deployed.state_changes[-1] == ["restart", "app--db.service", MAIN_SVC]
+
+    def test_a_network_podman_lost_is_created_again(self, deployed):
+        # Renamed by a NetworkName= change, or removed by hand: its unit still reads as active, so
+        # main requiring it would never run it again
+        files = app(
+            quadlets={
+                "edge.network": "[Network]\nNetworkName=edge-v2\n",
+                "main.container": MAIN + "Network=edge.network\n",
+            }
+        )
+        deployed.dependencies[MAIN_SVC] = ["app--edge-network.service"]
+        deployed.lost_networks.add("edge-v2")
+
+        run_module(files, state="started")
+
+        assert deployed.state_changes[-1] == ["restart", "app--edge-network.service", MAIN_SVC]
+
+    def test_a_network_podman_lost_is_created_before_main_starts(self, deployed):
+        files = app(
+            quadlets={
+                "edge.network": "[Network]\n",
+                "main.container": MAIN + "Network=edge.network\n",
+            }
+        )
+        run_module(files, state="started")
+        deployed.active.discard(MAIN_SVC)
+        deployed.lost_networks.add("app--edge")
+        deployed.calls.clear()
+
+        run_module(files, state="started")
+
+        assert deployed.state_changes == [
+            ["restart", "app--edge-network.service"],
+            ["start", MAIN_SVC],
+        ]
+
+    def test_a_rename_deployed_under_installed_is_created_by_the_next_started(self, deployed):
+        """
+        installed leaves running units alone, so the renamed network is not created then. A later
+        started run, with nothing left to write and main running, still has to.
+        """
+        files = app(
+            quadlets={
+                "edge.network": "[Network]\n",
+                "main.container": MAIN + "Network=edge.network\n",
+            }
+        )
+        run_module(files, state="started")
+        renamed = app(
+            quadlets={
+                "edge.network": "[Network]\nNetworkName=edge-v2\n",
+                "main.container": MAIN + "Network=edge.network\n",
+            }
+        )
+        run_module(renamed, state="installed")
+        deployed.lost_networks.add("edge-v2")
+        deployed.calls.clear()
+
+        outcome = run_module(renamed, state="started")
+
+        assert outcome.changed
+        # Restarting it restarts main onto it, as main requires it
+        assert deployed.state_changes == [["restart", "app--edge-network.service"]]
+
+    def test_a_network_podman_has_needs_nothing(self, deployed):
+        files = app(
+            quadlets={
+                "edge.network": "[Network]\n",
+                "main.container": MAIN + "Network=edge.network\n",
+            }
+        )
+        run_module(files, state="started")
+        deployed.calls.clear()
+
+        outcome = run_module(files, state="started")
+
+        assert outcome.exit["changed"] is False
+        assert deployed.state_changes == []
+
+    def test_a_lost_network_and_a_waiting_owner_are_restarted_together(self, deployed):
+        """
+        Each restart restarts what uses the unit, main included: in two calls, a container using
+        both the network and the volume would be restarted twice.
+        """
+        quadlets = {
+            "edge.network": "[Network]\n",
+            "main.container": MAIN + "Network=edge.network\n",
+        }
+        run_module(app(quadlets=quadlets), state="started")
+        owner_changed = app(quadlets={**quadlets, "data.volume": "[Volume]\nX-Owner=2000:2000\n"})
+        run_module(owner_changed, state="installed")
+        deployed.lost_networks.add("app--edge")
+        deployed.calls.clear()
+
+        run_module(owner_changed, state="started")
+
+        assert deployed.state_changes == [["restart", INIT_SVC, "app--edge-network.service"]]
+
+    def test_podman_is_asked_once_per_network(self, deployed):
+        # Whether the run has anything to do, and then what: the answer stays the same between
+        quadlets = {
+            "edge.network": "[Network]\n",
+            "back.network": "[Network]\n",
+            "main.container": MAIN + "Network=edge.network\nNetwork=back.network\n",
+        }
+        run_module(app(quadlets=quadlets), state="started")
+        deployed.lost_networks.add("app--edge")
+        deployed.calls.clear()
+
+        run_module(app(quadlets=quadlets), state="started")
+
+        assert [line for line in deployed.log if line.startswith("podman")] == [
+            "podman network exists app--back",
+            "podman network exists app--edge",
         ]
 
     def test_installed_while_running_does_not_restart(self, deployed):
@@ -286,6 +456,43 @@ class TestChanged:
         assert stale.exists()
 
 
+class TestUnlinkedServices:
+    """The module starts main and what main depends on; a container nothing links is warned of."""
+
+    def test_warned_about(self, fake_host, systemd):
+        systemd.dependencies[MAIN_SVC] = [INIT_SVC]
+        outcome = run_module(app(), state="installed")
+        assert outcome.warnings == [
+            (
+                "app--db.service is not linked to app--main.service, so deploying the app never "
+                "starts it, nor restarts it when it changes. Add Requires= or Wants= on it to the "
+                "main quadlet's [Unit] section, or have a timer run it."
+            )
+        ]
+
+    def test_linked_however_indirectly(self, fake_host, systemd):
+        # Pulled in through anything systemd follows: a Requires= chain, a pod's members...
+        systemd.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
+        assert run_module(app(), state="started").warnings == []
+
+    def test_not_warned_about_when_systemd_lacks_main(self, fake_host, systemd):
+        # The generator skipped main, though its dry run accepted it: what main links to is
+        # unknown, and every other service would read as linked to nothing
+        systemd.not_found.add(MAIN_SVC)
+        assert run_module(app(), state="installed").warnings == []
+
+    def test_a_timers_job_is_not_warned_about(self, fake_host, systemd):
+        systemd.dependencies[MAIN_SVC] = ["app--db.service"]
+        assert run_module(with_timer(), state="installed").warnings == []
+
+    def test_only_checked_when_files_change(self, fake_host, systemd):
+        run_module(app(), state="installed")
+        systemd.calls.clear()
+        outcome = run_module(app(), state="installed")
+        assert outcome.warnings == []
+        assert systemd.calls == []
+
+
 class TestForce:
     def test_rewrites_and_restarts_everything(self, deployed):
         deployed.dependencies[MAIN_SVC] = ["app--db.service", INIT_SVC]
@@ -312,6 +519,8 @@ class TestTimers:
             "is-enabled app--job.timer",
             "generator",
             "daemon-reload",
+            f"show -p LoadState {MAIN_SVC}",
+            f"list-dependencies --all --type service {MAIN_SVC}",
             "is-enabled app--job.timer",
             "enable app--job.timer",
             # Changed, so restarted without asking whether it runs
@@ -436,8 +645,10 @@ def test_anything_else_that_goes_wrong_is_reported_as_unexpected(fake_host, syst
             "name": None,
             "state": "installed",
             "force": False,
-            "systemctl_timeout": 120,
             "settle_time": 0,
+            "_systemctl_timeout": 300,
+            "_main_container": "main",
+            "_networks_only": False,
             "_control_node_processed": True,
             "_files": [{"kind": "bogus", "name": "x"}],
             "_contents": [""],

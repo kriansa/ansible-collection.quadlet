@@ -64,18 +64,21 @@ class TestRun:
         run = deploy(
             playbook_dir,
             MAIN,
-            args={"state": "started", "systemctl_timeout": 5},
+            args={"state": "started", "settle_time": 2},
             task_vars={"inventory_hostname": "h"},
         )
         assert run.module_name == "kriansa.quadlet.quadlet_app"
         assert run.module_args == {
             "src": "myapp",
             "state": "started",
-            "systemctl_timeout": 5,
+            "settle_time": 2,
             "_control_node_processed": True,
             # Names are logged; contents are no_log and matched to the names by position
             "_files": [{"kind": "quadlet", "name": "main.container"}],
             "_contents": ["[Container]\nImage=alpine\n"],
+            # What an app without a manifest gets
+            "_systemctl_timeout": 300,
+            "_main_container": "main",
         }
 
     def test_module_gets_the_original_task_vars(self, playbook_dir):
@@ -394,3 +397,128 @@ def test_decode_error_message(playbook_dir, monkeypatch):
         f"{path} is not valid UTF-8: 'utf-8' codec can't decode byte 0xff in position 0: "
         "invalid start byte"
     )
+
+
+class TestManifest:
+    def test_read_from_the_app_and_rendered(self, playbook_dir):
+        manifest = (
+            'version: "v1"\n'
+            "systemctl_timeout: {{ timeout }}\n"
+            'main_container: "{{ quadlet_app_name }}-web"\n'
+        )
+        run = deploy(
+            playbook_dir,
+            {"quadlets/myapp-web.container": "[Container]\n", "application.yml": manifest},
+            task_vars={"timeout": 900},
+        )
+        assert run.module_args["_systemctl_timeout"] == 900
+        assert run.module_args["_main_container"] == "myapp-web"
+
+    def test_the_yaml_extension_too(self, playbook_dir):
+        manifest = 'version: "v1"\nsystemctl_timeout: 7\n'
+        run = deploy(playbook_dir, {**MAIN, "application.yaml": manifest})
+        assert run.module_args["_systemctl_timeout"] == 7
+
+    def test_never_sent_to_the_host(self, playbook_dir):
+        run = deploy(playbook_dir, {**MAIN, "application.yml": 'version: "v1"\n'})
+        assert "application.yml" not in str(run.module_args)
+
+    def test_both_names_at_once(self, playbook_dir):
+        manifest = 'version: "v1"\n'
+        files = {**MAIN, "application.yml": manifest, "application.yaml": manifest}
+        run = deploy(playbook_dir, files)
+        app = playbook_dir / "myapp"
+        assert run.result == {
+            "failed": True,
+            "msg": "Failed to process files on control node: The app myapp has two manifests, "
+            f"{app}/application.yml and {app}/application.yaml. Keep only one.",
+        }
+        assert run.module_args is None
+
+    def test_an_invalid_one_fails_before_the_host(self, playbook_dir):
+        run = deploy(playbook_dir, {**MAIN, "application.yml": "version: 1\n"})
+        assert run.result["failed"] is True
+        assert "must be a string" in run.result["msg"]
+        assert run.module_args is None
+
+    def test_warnings_are_shown(self, playbook_dir, monkeypatch):
+        warnings = []
+        monkeypatch.setattr(action_plugin.display, "warning", warnings.append)
+        manifest = 'version: "v1"\ntimeout: 3\nx_mine: 1\n'
+        deploy(playbook_dir, {**MAIN, "application.yml": manifest})
+        assert len(warnings) == 1
+        assert "unknown key 'timeout' is ignored" in warnings[0]
+
+    def test_given_by_the_role_it_is_not_read_again(self, playbook_dir):
+        manifest = {"version": "v1", "systemctl_timeout": 42, "main_container": "main"}
+        run = deploy(
+            playbook_dir,
+            # A manifest that would not even parse: the role's copy is the one used
+            {**MAIN, "application.yml": "version: 1\n"},
+            args={"_manifest": {**manifest, "networks": ["x"]}},
+        )
+        assert run.module_args["_systemctl_timeout"] == 42
+        assert run.module_args["_main_container"] == "main"
+        # The role's copy stays on the control node
+        assert "_manifest" not in run.module_args
+
+    @pytest.mark.parametrize("manifest", ["v1", {"systemctl_timeout": 1}])
+    def test_given_by_the_role_in_the_wrong_shape(self, playbook_dir, manifest):
+        run = deploy(playbook_dir, MAIN, args={"_manifest": manifest})
+        assert run.result == {
+            "failed": True,
+            "msg": "Failed to process files on control node: _manifest is set by the "
+            "quadlet_stack role, to an app of what quadlet_stack_info returns",
+        }
+
+
+# Every file but the networks would fail to render: none of them may be rendered
+NETWORKS_AND_BROKEN_FILES = {
+    "quadlets/main.container": "[Container]\nImage={{ undefined_var }}\n",
+    "quadlets/b.network": "[Network]\nSubnet={{ subnet }}\n",
+    "quadlets/a.network": "[Network]\n",
+    "units/job.timer": "{{ undefined_var }}",
+    "config/main/x.conf": "{{ undefined_var }}",
+}
+
+
+class TestNetworksOnly:
+    def test_only_the_networks_are_rendered_and_sent(self, playbook_dir):
+        run = deploy(
+            playbook_dir,
+            NETWORKS_AND_BROKEN_FILES,
+            args={"_networks_only": True},
+            task_vars={"subnet": "10.0.0.0/24"},
+        )
+        assert rendered(run) == {
+            "quadlets/a.network": "[Network]\n",
+            "quadlets/b.network": "[Network]\nSubnet=10.0.0.0/24\n",
+        }
+        assert run.module_args["_networks_only"] is True
+
+    def test_without_networks_the_host_is_not_asked(self, playbook_dir):
+        run = deploy(playbook_dir, MAIN, args={"_networks_only": True})
+        assert run.module_args is None
+        assert run.result == {
+            "changed": False,
+            "application_name": "myapp",
+            "network_files": [],
+            "msg": "no networks",
+        }
+
+    @pytest.mark.parametrize("value", ["true", "yes", 1])
+    def test_read_as_ansible_reads_a_boolean(self, playbook_dir, value):
+        run = deploy(playbook_dir, MAIN, args={"_networks_only": value})
+        assert run.result["msg"] == "no networks"
+
+    @pytest.mark.parametrize("value", ["false", "no", 0])
+    def test_false_however_written_deploys_the_app(self, playbook_dir, value):
+        # Read as Python reads a string, "false" would be true, and the app silently not deployed
+        run = deploy(playbook_dir, MAIN, args={"_networks_only": value})
+        assert rendered(run) == MAIN
+
+    def test_not_a_boolean(self, playbook_dir):
+        run = deploy(playbook_dir, MAIN, args={"_networks_only": "maybe"})
+        assert run.result["failed"] is True
+        assert run.result["msg"].startswith("_networks_only: The value 'maybe' is not a valid")
+        assert run.module_args is None

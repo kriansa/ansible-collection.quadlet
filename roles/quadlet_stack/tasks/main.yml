@@ -1,0 +1,111 @@
+---
+# Nothing in this role sets tags. The tags a caller gives with `apply:` reach every task here, and
+# every task of the files and roles it includes: a task under a dynamic include takes its tags from
+# whatever contains the include.
+
+# Argument specs check a value's type without converting it, so a single name given as a string
+# would pass them - and then be read letter by letter
+- name: Check the deploy selection is a list
+  ansible.builtin.assert:
+    that:
+      - quadlet_stack_deploy_only is not string
+      - quadlet_stack_deploy_only is sequence
+    fail_msg: "quadlet_stack_deploy_only must be a list of app names, such as [web]"
+    quiet: true
+
+# Every app is read, whichever are deployed: a provider has to see every claim on the host, or one
+# that removes what nothing claims would remove what the apps not deployed this run claim
+- name: Read every app
+  kriansa.quadlet.quadlet_stack_info:
+    src: "{{ quadlet_stack_src }}"
+  register: quadlet_stack_result
+
+# Checked by name: filtering the selection down to the apps that exist would turn a typo into a
+# successful run that deploys nothing
+- name: Check the deploy selection names apps that exist
+  ansible.builtin.assert:
+    that: >-
+      quadlet_stack_deploy_only
+      | difference(quadlet_stack_result.quadlet_stack.apps_list)
+      | length == 0
+    fail_msg: >-
+      unknown app(s): {{
+        quadlet_stack_deploy_only
+        | difference(quadlet_stack_result.quadlet_stack.apps_list)
+        | join(', ')
+      }}
+    quiet: true
+
+# Every app's networks, before any app is deployed. A container joining a network that does not
+# exist is never created, so this is what lets apps deploy in any order, and one app deploy on a
+# host where the app owning its network never was. Networks already on the host are left alone.
+- name: Create every app's networks
+  kriansa.quadlet.quadlet_app:
+    src: "{{ quadlet_stack_result.quadlet_stack.src }}/{{ quadlet_stack_app }}"
+    _networks_only: true
+    _manifest: "{{ quadlet_stack_result.quadlet_stack.apps[quadlet_stack_app] }}"
+  loop: "{{ quadlet_stack_result.quadlet_stack.apps_list }}"
+  loop_control:
+    loop_var: quadlet_stack_app
+
+# Every role a claim names runs here, even one with nothing to do before the deploy, so a role
+# that cannot be found fails the run before any app is deployed.
+#
+# The loop variable has its own name: a provider looping over its claims binds `item`, and
+# quadlet_claims, resolved again inside that loop, would then read the provider's item instead.
+# quadlet_stack is passed here rather than set for the whole role, where a variable of the same
+# name from the caller would take its place.
+- name: Run the providers, before the deploy
+  ansible.builtin.include_role:
+    name: "{{ quadlet_stack_provider.key }}"
+  vars:
+    quadlet_hook: before
+    quadlet_claims: "{{ quadlet_stack_provider.value }}"
+    quadlet_stack: "{{ quadlet_stack_result.quadlet_stack }}"
+  loop: "{{ quadlet_stack_result.quadlet_stack.claims_by_role | dict2items }}"
+  loop_control:
+    loop_var: quadlet_stack_provider
+    label: "{{ quadlet_stack_provider.key }}"
+
+# One include per app, rather than one looped task: a looped task goes on to the next app after
+# one fails, while each include is a task of its own, and the first failure stops the rest.
+#
+# In name order, whatever order the selection lists them in. Which app failed is recorded as it
+# goes rather than worked out from that order: with several hosts, Ansible merges the includes the
+# hosts have in common, and a host can deploy its apps in another order than its list.
+- name: Deploy the apps
+  block:
+    - name: Start the list of the apps deployed
+      ansible.builtin.set_fact:
+        quadlet_stack_applied: []
+        quadlet_stack_deploying: null
+
+    - name: Deploy each app
+      ansible.builtin.include_tasks: deploy_one.yml
+      loop: >-
+        {{ (quadlet_stack_deploy_only or quadlet_stack_result.quadlet_stack.apps_list)
+        | unique | sort }}
+      loop_control:
+        loop_var: quadlet_stack_app
+
+  rescue:
+    - name: Report where the deploy stopped
+      ansible.builtin.fail:
+        msg: >-
+          Deploying {{ quadlet_stack_deploying }} failed, and the apps after it were not
+          deployed. Deployed before it:
+          {{ quadlet_stack_applied | join(', ') if quadlet_stack_applied else 'none' }}.
+          The error: {{ ansible_failed_result.msg
+          | default(ansible_failed_result.reason | default('unknown')) }}
+
+- name: Run the providers, after the deploy
+  ansible.builtin.include_role:
+    name: "{{ quadlet_stack_provider.key }}"
+  vars:
+    quadlet_hook: after
+    quadlet_claims: "{{ quadlet_stack_provider.value }}"
+    quadlet_stack: "{{ quadlet_stack_result.quadlet_stack }}"
+  loop: "{{ quadlet_stack_result.quadlet_stack.claims_by_role | dict2items }}"
+  loop_control:
+    loop_var: quadlet_stack_provider
+    label: "{{ quadlet_stack_provider.key }}"

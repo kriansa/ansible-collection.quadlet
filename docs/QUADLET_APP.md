@@ -10,6 +10,7 @@ Define your entire application—containers, volumes, networks, configuration, a
 
 ```
 myapp/
+├── application.yml        # Optional: The app's manifest - see Manifest below
 ├── quadlets/              # Required: Quadlet unit files
 │   ├── main.container     # Required: Primary container
 │   ├── db.container       # Optional: Additional containers
@@ -32,16 +33,27 @@ myapp/
 ### Directory Rules
 
 - **quadlets/**: Contains `.container`, `.volume`, `.network`, `.pod`, or `.kube` files
-  - `main.container` is the only requirement
+  - The main quadlet is the only requirement: `main.container`, `main.pod` or `main.kube`, or the
+    one the manifest names with `main_container`. Its service is the one `state` applies to
+    (`myapp--main.service`, or `myapp--main-pod.service` for a pod). There must be exactly one: a
+    `main.container` and a `main.pod` side by side fail the deploy before anything is written
+  - Every other container, pod and kube file of the app must be linked to main - see
+    [Dependency Handling](#dependency-handling)
   - Files are deployed to `/etc/containers/systemd/`
   - Resource names are automatically prefixed with app name when deployed
   - Contents in these files are automatically templated like `ansible.builtin.template`
   - A `.timer` here is an error — it is not a quadlet type and belongs in `units/`
+  - A file name cannot contain `--`, which separates the app's name from its files' names once
+    deployed. App `web`'s `x--main.network` would be deployed as `web--x--main.network`, the name
+    app `web--x` gives its `main.network`, and the two apps would overwrite each other's file
+  - Template quadlets (`worker@.container`) are not supported: a file name with `@` is an error.
+    Write one quadlet for each instance instead
 
 - **units/**: Plain systemd units, currently `.timer` files — see [Timers](#timers)
   - Files are deployed to `/etc/systemd/system/`
   - Unit references are prefixed and templated exactly as in `quadlets/`
   - Anything with an unrecognized extension is rejected rather than ignored
+  - A file name cannot contain `--`, as in `quadlets/`
 
 - **init/**: One-time initialization files mounted into containers
   - Subdirectories use the quadlet stem without suffix (e.g., `main/` for `main.container`)
@@ -92,7 +104,12 @@ automatically — see [Volume Ownership](#volume-ownership).*
 
 Joining another app's network by its file name, rather than by its podman network name
 (`Network=otherapp--main`), also makes the container wait for that network to be created. The other
-app has to be deployed first.
+app's network has to be on the host first: deploy it first, or deploy both with the
+[quadlet_stack role](QUADLET_STACK.md), which creates every app's networks before deploying any.
+
+Networks are the one resource apps share. An app relies only on its own volumes and pods: naming
+another app's, as in `Volume=otherapp--data.volume` or `Pod=otherapp--edge.pod`, is not
+supported. The network is how apps talk to each other; the rest belongs to the app that defines it.
 
 ### Path Replacement
 Volume paths using `%init%` or `%config%` placeholders are replaced with deployment paths.
@@ -181,6 +198,14 @@ Image=nginx:latest
 ```
 
 Applies to: `ContainerName` (`.container`), `PodName` (`.pod`), `VolumeName` (`.volume`), `NetworkName` (`.network`). Explicit names in your files are always respected.
+
+The module reads a network's `NetworkName=` itself, to ask podman whether the network exists, and
+reads it the way podman does: double quotes around the value removed, and a line ending in `\`
+joined to the next. Keep it to a plain name, though: two forms are read differently. A comment
+line inside a continued value is skipped by podman but not by the module, and a systemd specifier
+such as `%N` is expanded by systemd only when the unit runs. Read differently, podman never has
+the name the module asks about, so the network - and every container joined to it, other apps'
+included - is restarted on every `started` run.
 
 ## Volume Ownership
 
@@ -397,8 +422,48 @@ journalctl -u myapp--backup.service         # what happened when it did
 | `name` | No | basename of src | Application name (lowercase, letters/numbers/hyphens/underscores) |
 | `state` | No | `installed` | Deployment state: `installed`, `started`, `restarted` |
 | `force` | No | `false` | Force redeployment even if files haven't changed |
-| `systemctl_timeout` | No | `120` | Timeout in seconds for systemctl commands (start, stop, restart, daemon-reload) |
 | `settle_time` | No | `5` | Seconds the services a run started must stay up before the task succeeds; `0` turns the check off. See [Startup check](#startup-check) |
+
+### Manifest
+
+An app can describe itself in `application.yml` (or `application.yaml` - not both) beside its
+`quadlets/` directory. Without one, it gets the defaults below.
+
+```yaml
+version: "v1"
+
+# Optional. Seconds Ansible waits for each systemctl command. Defaults to 300.
+systemctl_timeout: 900
+
+# Optional. The quadlet whose service is the app's main one, by name, without extension.
+# Defaults to "main".
+main_container: web
+
+# Optional. What the app needs from outside itself, by the role that provides it. Only the
+# quadlet_stack role acts on these - see QUADLET_STACK.md.
+resource_claims: {}
+```
+
+`version` is required, is a string - quote it - and has to be one this collection knows; anything
+after a `/` is a variant tag, so `v1/testing` reads as `v1`. A key the manifest does not define
+warns, unless it starts with `x_` or `_`.
+
+The manifest is templated like every other file of the app, `quadlet_app_name` included, then read
+as YAML, and never reaches the host. Template values as `{{ var | to_json }}`, unquoted: a value
+written plainly is read as whatever YAML makes of it - `yes` becomes a boolean, one containing `: `
+breaks the file - and one put inside quotes loses its backslashes, or becomes text where a number
+was meant. When the file does not parse, the error shows the rendered text. The
+[quadlet_stack documentation](QUADLET_STACK.md#the-manifest) has the full rules.
+
+`systemctl_timeout` bounds how long **Ansible** waits for each `systemctl` command - `start`,
+`restart` and `daemon-reload` alike. It is not a systemd timeout, and raising it does nothing for
+the others:
+
+| | Bounds | Set in |
+|---|---|---|
+| `systemctl_timeout` | how long Ansible waits for `systemctl` to return | the manifest |
+| `TimeoutStartSec=` / `TimeoutStopSec=` | how long systemd waits before failing the unit | the quadlet's `[Service]` |
+| `StopTimeout=` | how long podman waits before killing the container | the quadlet's `[Container]` |
 
 ### States
 
@@ -582,6 +647,11 @@ webapp/
 
 ```ini
 # quadlets/main.container
+[Unit]
+# Links api to main: starting the app starts it, and deploying a change restarts it
+Requires=api.service
+After=api.service
+
 [Container]
 Image=docker.io/library/nginx:alpine
 Network=app.network
@@ -669,9 +739,16 @@ Units from `units/` keep their own suffix: `backup.timer` becomes `myapp--backup
 
 ### Dependency Handling
 
+The module manages the main service, and leaves the rest of the app to systemd: it starts main, and
+systemd starts what main depends on. **Every other container, pod and kube file of the app must
+therefore be linked to main** - by `Requires=` or `Wants=` in main's `[Unit]` section, directly or
+through another of the app's units, or by being a container in main's pod. One that isn't is never
+started by a deploy, nor restarted when it changes, and the deploy warns about it. A container that
+a [timer](#timers) runs is the exception: it runs on its schedule only.
+
 When using `state=restarted`, or `state=started` with file changes, the module:
-1. Discovers all app-prefixed service dependencies of the main service — everything it `Requires=`
-   or `Wants=`, directly or not
+1. Discovers the app's services main depends on — everything it `Requires=` or `Wants=`, directly
+   or not
 2. Restarts them, the main service, and any volume bootstrap unit still to apply its `X-Owner`, in a
    single `systemctl restart`
 
@@ -683,6 +760,17 @@ etc.) are restarted in the correct order.
 This happens whether or not the main service is running. A unit that is not running is simply
 started, and a secondary container still running while main is stopped gets its new definition too.
 Bootstrap units whose `X-Owner` is already applied are never restarted.
+
+Nor are the app's networks, unless podman no longer has them. systemd restarts every unit requiring
+a restarted one, and a container of another app joining the network with
+`Network=myapp--main.network` requires it: restarting the network on every deploy would restart
+that other app. It would not apply a changed definition either, since podman creates a network only
+if it does not exist - a changed definition only applies once the network is removed and created
+again. A network podman lacks - renamed by a `NetworkName=` change, or removed by hand - is
+restarted, so podman creates it again, and the apps joined to it restart with it, as they have to
+in order to join it. That happens under `started` and `restarted`, even when nothing else changed:
+a rename deployed under `installed`, which leaves running units alone, is applied by the next
+`started` run.
 
 ### Startup check
 

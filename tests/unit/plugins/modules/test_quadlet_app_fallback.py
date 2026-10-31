@@ -54,17 +54,38 @@ def test_same_output_as_the_action_plugin_path(tmp_path, fake_host, systemd):
     assert action.exit == fallback.exit
 
 
-class TestChecksOnlyThisPathMakes:
+MISSING_MAIN = (
+    "The app app has no main quadlet: expected one of quadlets/main.container, "
+    "quadlets/main.pod, quadlets/main.kube. Which quadlet is the main one is set by "
+    "main_container in the app's manifest, and defaults to 'main'."
+)
+
+
+class TestChecksBothPathsMake:
     def test_missing_main_container(self, tmp_path, fake_host, systemd):
         app_dir = write_app(tmp_path / "app", {"db.container": "[Container]\n"})
         outcome = run_module(None, src=str(app_dir), control_node_processed=False)
-        assert outcome.failure["msg"].startswith("Required file not found:")
+        assert outcome.failure == {"msg": MISSING_MAIN}
 
     def test_missing_main_container_through_the_action_plugin_path(self, fake_host, systemd):
-        # Pinned: the same app deploys without complaint when the action plugin sent it
         outcome = run_module(make_files_data({"db.container": "[Container]\n"}), state="installed")
-        assert outcome.changed
+        assert outcome.failure == {"msg": MISSING_MAIN}
+        assert fake_host.files() == {}
 
+    def test_empty_app_through_the_action_plugin_path(self, fake_host, systemd):
+        outcome = run_module(make_files_data(), state="installed")
+        assert outcome.failure == {"msg": MISSING_MAIN}
+
+    def test_main_pod_counts_on_both_paths(self, tmp_path, fake_host, systemd):
+        app_dir = write_app(tmp_path / "app", {"main.pod": "[Pod]\n"})
+        fallback = run_module(None, src=str(app_dir), control_node_processed=False)
+        action = run_module(make_files_data({"main.pod": "[Pod]\n"}))
+        assert (
+            fallback.exit["service_name"] == action.exit["service_name"] == "app--main-pod.service"
+        )
+
+
+class TestChecksOnlyThisPathMakes:
     def test_orphan_config_directory(self, tmp_path, fake_host, systemd):
         app_dir = write_app(tmp_path / "app", QUADLETS, config={"nomatch": {"f": "x"}})
         outcome = run_module(None, src=str(app_dir), control_node_processed=False)
@@ -87,12 +108,6 @@ class TestChecksOnlyThisPathMakes:
         )
         assert outcome.changed
         assert fake_host.files()["srv/app/config/main/f"] == "x"
-
-    def test_empty_app_through_the_action_plugin_path(self, fake_host, systemd):
-        # Pinned: nothing to deploy reads as "already up to date"
-        outcome = run_module(make_files_data(), state="installed")
-        assert outcome.exit["changed"] is False
-        assert outcome.msg == "application already up to date"
 
 
 class TestReadingFiles:

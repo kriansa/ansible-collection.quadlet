@@ -10,6 +10,7 @@ from ansible_collections.kriansa.quadlet.plugins.module_utils.app import Quadlet
 from ansible_collections.kriansa.quadlet.plugins.module_utils.errors import QuadletAppError
 from ansible_collections.kriansa.quadlet.plugins.module_utils.generator import QuadletGenerator
 from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import HostFiles
+from ansible_collections.kriansa.quadlet.plugins.module_utils.networks import AppNetworks
 from ansible_collections.kriansa.quadlet.plugins.module_utils.services import AppServices
 from ansible_collections.kriansa.quadlet.plugins.module_utils.sources import (
     ActionPluginFiles,
@@ -34,8 +35,16 @@ class QuadletAppModule:
         self.app_name = params.get("name") or os.path.basename(os.path.normpath(self.src))
         self.state = params["state"]
         self.force = params["force"]
-        self.systemctl_timeout = params["systemctl_timeout"]
         self.settle_time = params["settle_time"]
+
+        # Facts about the app rather than choices of the task: the action plugin reads them from
+        # the app's manifest
+        self.systemctl_timeout = params["_systemctl_timeout"]
+        self.main_container = params["_main_container"]
+
+        # Only create the app's networks that are missing from the host - the pass the
+        # quadlet_stack role makes over every app before it deploys any
+        self.networks_only = params["_networks_only"]
 
         # Whether the action plugin sent the files, templated on the control node. Without it, the
         # module reads them from src on the managed host.
@@ -53,7 +62,12 @@ class QuadletAppModule:
             self.module.fail_json(msg=f"Unexpected error: {e!s}")
 
     def _deploy(self) -> None:
-        app = self._source().load(self.app_name)
+        app = self._source().load(self.app_name, self.main_container)
+        if self.networks_only:
+            self._create_networks(app)
+            return
+
+        app.check_main()
         files = HostFiles(app.files(), self.force)
         services = AppServices(
             app, Systemd(self.systemctl_timeout), files, self.state, self.settle_time
@@ -74,7 +88,18 @@ class QuadletAppModule:
             files.write()
 
         services_changed = services.apply(files_changed=needs_update)
+        for warning in services.warnings:
+            self.module.warn(warning)
         self._exit(app, changed=needs_update or services_changed, msg=self._success_message())
+
+    def _create_networks(self, app: QuadletApp) -> None:
+        changed = AppNetworks(app, Systemd(self.systemctl_timeout)).create()
+        self.module.exit_json(
+            changed=changed,
+            application_name=app.name,
+            network_files=[network.deployed_name for network in app.networks],
+            msg="networks created" if changed else "networks already present",
+        )
 
     def _source(self) -> ActionPluginFiles | AppDirectory:
         if self.control_node_processed:

@@ -1,0 +1,17 @@
+---
+- name: Note {{ quadlet_stack_app }} as the app being deployed
+  ansible.builtin.set_fact:
+    quadlet_stack_deploying: "{{ quadlet_stack_app }}"
+
+# The manifest is handed over as quadlet_stack_info read it, rather than read again: this task
+# renders with other variables in scope, and the app would then be deployed with values that could
+# differ from those the providers were given
+- name: Deploy {{ quadlet_stack_app }}
+  kriansa.quadlet.quadlet_app:
+    src: "{{ quadlet_stack_result.quadlet_stack.src }}/{{ quadlet_stack_app }}"
+    state: "{{ quadlet_stack_state }}"
+    _manifest: "{{ quadlet_stack_result.quadlet_stack.apps[quadlet_stack_app] }}"
+
+- name: Record {{ quadlet_stack_app }} as deployed
+  ansible.builtin.set_fact:
+    quadlet_stack_applied: "{{ quadlet_stack_applied + [quadlet_stack_app] }}"

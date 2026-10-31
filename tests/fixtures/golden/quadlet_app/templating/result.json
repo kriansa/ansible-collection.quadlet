@@ -21,14 +21,14 @@
         "systemctl",
         "daemon-reload"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [
         "systemctl",
         "show",
         "-p",
-        "Id,Type,ActiveState,SubState,InvocationID",
+        "LoadState",
         "templating--main.service"
       ],
       "timeout": 10
@@ -47,10 +47,20 @@
     {
       "argv": [
         "systemctl",
+        "show",
+        "-p",
+        "Id,Type,ActiveState,SubState,InvocationID",
+        "templating--main.service"
+      ],
+      "timeout": 10
+    },
+    {
+      "argv": [
+        "systemctl",
         "restart",
         "templating--main.service"
       ],
-      "timeout": 120
+      "timeout": 300
     },
     {
       "argv": [

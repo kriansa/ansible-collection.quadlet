@@ -96,6 +96,31 @@ class TestTextHelpers:
         unit = UnitFile("[Container]\nVolume=a:/a\n# Volume=b:/b\nImage=x\n  Volume = c:/c\n")
         assert [directive.value for directive in unit.directives("Volume")] == ["a:/a", "c:/c"]
 
+    def test_values_of_one_key_in_one_section(self):
+        unit = UnitFile(
+            "Name=before\n[Network]\nName=a\n[Unit]\nName=b\n# Name=c\n\n[Network]\nName=d\n"
+        )
+        # Every section of that name, as podman reads them all as one
+        assert unit.section_values("Network", "Name") == ["a", "d"]
+
+    @pytest.mark.parametrize(
+        "lines, value",
+        [
+            # Each read the way podman's generator turns it into `podman network create`
+            ('Name="edge"', "edge"),
+            ('Name= "spaced" \r', "spaced"),
+            ("Name='single'", "'single'"),
+            ('Name=ed"ge"x', 'ed"ge"x'),
+            ('Name="esc\\x41ped"', "esc\\x41ped"),
+            ("Name=edge\\\n2", "edge2"),
+            ("Name=edge \\\n  two", "edge two"),
+            ('Name=""', ""),
+        ],
+    )
+    def test_values_read_as_podman_reads_them(self, lines, value):
+        unit = UnitFile(f"[Network]\n{lines}\nOther=x\n")
+        assert unit.section_values("Network", "Name") == [value]
+
     def test_map_directives_leaves_everything_else_alone(self):
         content = "# Key=1\n[Unit]\n\nKey=2\n; Key=3\nnot a directive\n"
         assert edited(content, lambda unit: unit.map_directives(lambda d: d.with_value("x"))) == (

@@ -10,8 +10,12 @@ from pathlib import Path
 from ansible_collections.kriansa.quadlet.plugins.module_utils import constants
 from ansible_collections.kriansa.quadlet.plugins.module_utils.errors import QuadletAppError
 from ansible_collections.kriansa.quadlet.plugins.module_utils.host_file import DataFile, HostFile
-from ansible_collections.kriansa.quadlet.plugins.module_utils.quadlets import Quadlet, Volume
-from ansible_collections.kriansa.quadlet.plugins.module_utils.unit_file import Directive
+from ansible_collections.kriansa.quadlet.plugins.module_utils.quadlets import (
+    Network,
+    Quadlet,
+    Volume,
+)
+from ansible_collections.kriansa.quadlet.plugins.module_utils.unit_file import Directive, UnitFile
 from ansible_collections.kriansa.quadlet.plugins.module_utils.units import SystemdUnit, Timer
 
 # Application names: a single letter, or a letter followed by letters, numbers, hyphens and
@@ -61,28 +65,51 @@ class QuadletApp:
     know every name the app defines.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, main_container: str = constants.DEFAULT_MAIN_CONTAINER):
         """
         Args:
             name: The application name, in any case
+            main_container: The name of the quadlet whose service is the app's main one, without
+                its extension (e.g. "main" for main.container)
 
         Raises:
             QuadletAppError: If the name is not one an app can have
         """
         self.name = name.lower()
         self._validate_name()
+        self.main_container = main_container
         self.quadlets: list[Quadlet] = []
         self.units: list[SystemdUnit] = []
         self.data_files: list[DataFile] = []
 
     def add_quadlet(self, filename: str, source: str) -> Quadlet:
-        """Add a file from quadlets/."""
+        """
+        Add a file from quadlets/.
+
+        Raises:
+            QuadletAppError: If the file's name is not one the app can deploy, see
+                _check_filename. A template quadlet ("worker@.container") is not supported:
+                deploying the app restarts and checks the services its quadlets become, and the
+                running instances of a template are services of another name.
+        """
+        self._check_filename("quadlets", filename)
+        if "@" in filename:
+            raise QuadletAppError(
+                f"The app {self.name} cannot deploy quadlets/{filename}: template quadlets, whose "
+                "name has an @, are not supported. Write one quadlet for each instance instead."
+            )
         quadlet = Quadlet.create(self, filename, source)
         self.quadlets.append(quadlet)
         return quadlet
 
     def add_unit(self, filename: str, source: str) -> SystemdUnit:
-        """Add a file from units/."""
+        """
+        Add a file from units/.
+
+        Raises:
+            QuadletAppError: If the file's name is not one the app can deploy, see _check_filename
+        """
+        self._check_filename("units", filename)
         unit = SystemdUnit.create(self, filename, source)
         self.units.append(unit)
         return unit
@@ -100,11 +127,60 @@ class QuadletApp:
 
     @property
     def main_service(self) -> str:
-        return f"{self.name}--main.service"
+        """
+        The service the app's state is judged by: started, restarted, or left alone.
+
+        Raises:
+            QuadletAppError: If the app has no main quadlet, see main_quadlet
+        """
+        return self.main_quadlet().service_name
+
+    def main_quadlet(self) -> Quadlet:
+        """
+        The quadlet named by main_container, of one of the types whose service keeps running.
+
+        A pod or a kube file can be the main one as well as a container: the service podman makes
+        of it is named after its type, so a pod's is "<app>--<name>-pod.service".
+
+        Raises:
+            QuadletAppError: If there is no such quadlet, or more than one
+        """
+        stem = self.main_container
+        found = [
+            quadlet
+            for quadlet in self.quadlets
+            if quadlet.stem == stem and quadlet.kind in LONG_RUNNING_KINDS
+        ]
+        if not found:
+            expected = ", ".join(f"quadlets/{stem}{kind}" for kind in LONG_RUNNING_KINDS)
+            raise QuadletAppError(
+                f"The app {self.name} has no main quadlet: expected one of {expected}. "
+                "Which quadlet is the main one is set by main_container in the app's manifest, "
+                f"and defaults to '{constants.DEFAULT_MAIN_CONTAINER}'."
+            )
+        if len(found) > 1:
+            raise QuadletAppError(
+                f"The app {self.name} has more than one main quadlet: "
+                f"{', '.join(quadlet.filename for quadlet in found)}. Keep only one of them."
+            )
+        return found[0]
+
+    def check_main(self) -> None:
+        """
+        Check the app has its main quadlet.
+
+        Raises:
+            QuadletAppError: If it has none, or more than one
+        """
+        self.main_quadlet()
 
     @property
     def volumes(self) -> list[Volume]:
         return [quadlet for quadlet in self.quadlets if isinstance(quadlet, Volume)]
+
+    @property
+    def networks(self) -> list[Network]:
+        return [quadlet for quadlet in self.quadlets if isinstance(quadlet, Network)]
 
     @property
     def timers(self) -> list[Timer]:
@@ -171,11 +247,65 @@ class QuadletApp:
         """The services of every ownership bootstrap unit of the app."""
         return [volume.init_service_name for volume in self.volumes]
 
+    def own_services(self) -> set[str]:
+        """
+        Every service the app's quadlets become, the generated bootstrap units included.
+
+        Matched by name, not by the app's prefix: an app called "web--x" deploys services that
+        start with "web--" too, and they are not this app's.
+        """
+        return {quadlet.service_name for quadlet in self.quadlets} | set(
+            self.volume_init_services()
+        )
+
+    def timer_targets(self) -> set[str]:
+        """The services the app's timers run."""
+        return {timer.target_service for timer in self.timers}
+
     def pending_volume_inits(self) -> list[str]:
         """The services of the bootstrap units whose volume has yet to get its declared owner."""
         return [
             volume.init_service_name for volume in self.volumes if not volume.ownership_applied()
         ]
+
+    def network_references(self) -> list[str]:
+        """
+        The networks the app's containers, pods and kube files join, as they are deployed.
+
+        Each is a Network= value with its options dropped: a network quadlet's filename - the app's
+        own carrying its prefix, as Rule 1 writes it - or the name of a network podman already
+        has. The modes podman can run networking in instead (host, none, another container's...)
+        join no network, and are left out.
+
+        Returns:
+            Each reference once, in the order the files name them (e.g. ["myapp--main.network",
+            "other--main"])
+        """
+        references = []
+        for quadlet in sorted(self.quadlets, key=lambda quadlet: quadlet.filename):
+            if quadlet.kind not in LONG_RUNNING_KINDS:
+                continue
+            for name in self._networks_joined_by(quadlet):
+                if name not in references:
+                    references.append(name)
+        return references
+
+    def _networks_joined_by(self, quadlet: Quadlet) -> list[str]:
+        """The networks one quadlet joins, as network_references describes them."""
+        joined: list[str] = []
+        for directive in UnitFile(quadlet.source).directives("Network"):
+            name = self.prefix_reference(directive).value.strip().partition(":")[0]
+            if not name:
+                # An empty Network= clears the ones before it, as an empty value does for any
+                # list in a unit file - and is what Network={{ x | default('') }} renders to
+                joined = []
+                continue
+            # Network=other.container shares that container's networking: quadlet's spelling of
+            # the container: mode
+            if name in constants.PODMAN_NETWORK_MODES or name.endswith(".container"):
+                continue
+            joined.append(name)
+        return joined
 
     def prefix_reference(self, directive: Directive) -> Directive:
         """
@@ -287,6 +417,21 @@ class QuadletApp:
             if suffix is not None:
                 units.add(f"{Path(filename).stem}{suffix}")
         return units
+
+    def _check_filename(self, directory: str, filename: str) -> None:
+        """
+        Refuse a file name holding "--", which separates the app's name from its files' names.
+
+        A file is deployed as "<app>--<file>", so app "web" deploying "x--main.network" would
+        write "web--x--main.network" - the file app "web--x" deploys for its "main.network". The
+        two apps would overwrite each other's file on every deploy.
+        """
+        if "--" in filename:
+            raise QuadletAppError(
+                f"The app {self.name} cannot deploy {directory}/{filename}: a file name cannot "
+                f"contain '--'. Deployed as {self.name}--{filename}, it could take the name of "
+                "another app's file, since '--' separates an app's name from its files' names."
+            )
 
     def _validate_name(self) -> None:
         if len(self.name) == 1:

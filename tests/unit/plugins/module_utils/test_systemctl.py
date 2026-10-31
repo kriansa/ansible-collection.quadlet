@@ -85,8 +85,24 @@ class TestRun:
         assert outcome.failure["rc"] == 1
 
 
+def listing(dependencies, load_state="loaded", returncode=0, seen=None):
+    """
+    systemctl as it answers about one service: its load state, then its dependencies - which it
+    lists, succeeding, whether or not it has the service.
+    """
+
+    def run(argv, **kwargs):
+        if seen is not None:
+            seen.append((argv, kwargs["timeout"]))
+        if argv[1] == "show":
+            return subprocess.CompletedProcess(argv, 0, f"LoadState={load_state}\n", "")
+        return subprocess.CompletedProcess(argv, returncode, dependencies, "")
+
+    return run
+
+
 class TestDependencies:
-    def test_parses_app_units_only(self, monkeypatch):
+    def test_parses_every_service_once(self, monkeypatch):
         output = (
             "app--main.service\n"
             "  app--db.service\n"
@@ -94,18 +110,22 @@ class TestDependencies:
             "  sysinit.target\n"
             "    app--cache.service\n"
             "  other--x.service\n"
+            "    app--db.service\n"
         )
-        install(monkeypatch, returning(0, output))
-        assert Systemd(120).dependencies("app--main.service", "app--") == [
+        install(monkeypatch, listing(output))
+        # Which of them are the app's own is for the caller to decide, by name
+        assert Systemd(120).dependencies("app--main.service") == [
             "app--db.service",
             "app--cache.service",
+            "other--x.service",
         ]
 
-    def test_query_is_bounded(self, monkeypatch):
+    def test_queries_are_bounded(self, monkeypatch):
         seen = []
-        install(monkeypatch, recording(seen))
-        Systemd(120).dependencies("app--main.service", "app--")
+        install(monkeypatch, listing("app--main.service\n", seen=seen))
+        Systemd(120).dependencies("app--main.service")
         assert seen == [
+            (["systemctl", "show", "-p", "LoadState", "app--main.service"], 10),
             (
                 [
                     "systemctl",
@@ -116,21 +136,35 @@ class TestDependencies:
                     "app--main.service",
                 ],
                 10,
-            )
+            ),
         ]
 
-    def test_failure_means_no_dependencies(self, monkeypatch):
-        install(monkeypatch, returning(1, "", "Unit not found"))
-        assert Systemd(120).dependencies("app--main.service", "app--") == []
+    def test_none_but_main(self, monkeypatch):
+        install(monkeypatch, listing("app--main.service\n"))
+        assert Systemd(120).dependencies("app--main.service") == []
 
-    def test_timeout_means_no_dependencies(self, monkeypatch):
+    @pytest.mark.parametrize("load_state", ["not-found", "masked", "bad-setting"])
+    def test_a_service_systemd_does_not_have_means_it_could_not_say(self, monkeypatch, load_state):
+        # Listed as one without dependencies, which is how systemctl answers for a unit it lacks
+        install(monkeypatch, listing("app--main.service\n", load_state=load_state))
+        assert Systemd(120).dependencies("app--main.service") is None
+
+    def test_failure_means_systemd_could_not_say(self, monkeypatch):
+        install(monkeypatch, returning(1, "", "Failed to connect to bus"))
+        assert Systemd(120).dependencies("app--main.service") is None
+
+    def test_failure_to_list_means_systemd_could_not_say(self, monkeypatch):
+        install(monkeypatch, listing("", returncode=1))
+        assert Systemd(120).dependencies("app--main.service") is None
+
+    def test_timeout_means_systemd_could_not_say(self, monkeypatch):
         install(monkeypatch, raising(subprocess.TimeoutExpired("systemctl", 10)))
-        assert Systemd(120).dependencies("app--main.service", "app--") == []
+        assert Systemd(120).dependencies("app--main.service") is None
 
     def test_missing_systemctl_fails(self, monkeypatch):
         install(monkeypatch, raising(FileNotFoundError("systemctl")))
         with pytest.raises(QuadletAppError) as excinfo:
-            Systemd(120).dependencies("app--main.service", "app--")
+            Systemd(120).dependencies("app--main.service")
         assert excinfo.value.msg == "systemctl command not found: systemctl"
 
 

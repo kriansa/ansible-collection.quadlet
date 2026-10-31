@@ -113,6 +113,20 @@ class TestTimer:
         out = render("backup.timer", "[Timer]\nOnCalendar=daily\nUnit=\n")
         assert out == "[Timer]\nOnCalendar=daily\nUnit=\n" + INSTALL
 
+    @pytest.mark.parametrize(
+        "content, target",
+        [
+            ("[Timer]\nOnCalendar=daily\n", "app--backup.service"),
+            ("[Timer]\nOnCalendar=daily\nUnit=job.pod\n", "app--job-pod.service"),
+            ("[Timer]\nOnCalendar=daily\nUnit=logrotate.service\n", "logrotate.service"),
+        ],
+    )
+    def test_target_service(self, content, target):
+        app = QuadletApp("app")
+        app.add_quadlet("backup.container", "")
+        app.add_quadlet("job.pod", "")
+        assert app.add_unit("backup.timer", content).target_service == target
+
     def test_timer_without_timer_section_only_gets_install(self):
         # Pinned: nothing would make it fire, so no Unit= is added to hide that
         assert render("backup.timer", "[Unit]\nDescription=x\n") == (
